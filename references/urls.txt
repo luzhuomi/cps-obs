@@ -1,0 +1,2 @@
+http://stackoverflow.com/questions/6606240/translating-imperative-to-functional-code
+and kenny's site cps talk in pdf

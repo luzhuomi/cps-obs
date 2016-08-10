@@ -1,0 +1,6 @@
+1. c -> ssa normalization
+   refer to frank pfenning's lecture notes 09-ssa.pdf
+2. ssa -> cps conversion
+  refer to kelsey-ssa-cps.pdf
+
+TODO how to randomly select which to convert
