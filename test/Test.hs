@@ -2,7 +2,7 @@
 import System.Environment(getArgs)
 import Control.Monad.IO.Class(liftIO, MonadIO)
 import Clang.String(unpack)
-import Clang.TranslationUnit(getDiagnosticSet, {-getSpelling,-} getCursor)
+import Clang.TranslationUnit(getDiagnosticSet, {-getSpelling,-} getCursor, save)
 import Clang(parseSourceFile)
 import Clang
 import Clang.Cursor 
@@ -40,6 +40,8 @@ test3 tu = do
       { let main = head mains
       ; traverseCursor main
       }
+  ; _ <- save tu "./save.cpp" Nothing 
+  ; return ()
   }
            
 getMain cursor = do 
