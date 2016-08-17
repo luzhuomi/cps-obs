@@ -4,7 +4,7 @@ import System.IO (hPutStrLn, stderr)
 import Control.Monad (when)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
-import Language.C (parseCFile)
+import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 
@@ -18,7 +18,8 @@ main = do
   when (length args < 1) usageErr
   let (opts,input_file) = (init args, last args)
   ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts input_file
-  putStrLn (show $ pretty ast)
+  -- ast <- errorOnLeftM "Parse Error" $ parseCFilePre input_file
+  putStrLn (render $ pretty ast)
 
 errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
 errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
