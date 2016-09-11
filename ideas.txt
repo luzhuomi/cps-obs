@@ -1,5 +1,9 @@
 1. c -> ssa normalization
    refer to frank pfenning's lecture notes 09-ssa.pdf
+   i) c -> CFG (blocks)
+   ii) CFG -> Dominance frontiers
+   iii) Dominance frontiers -> phi functions
+   iv) variable renaming
 2. ssa -> cps conversion
   refer to kelsey-ssa-cps.pdf
 
