@@ -10,11 +10,11 @@ import qualified Language.C.Data.Node as N
 type Stmt = AST.CStatement N.NodeInfo
 
 data CFG = CFG { nodes :: IntMap Node -- ^ NodeID -> Node
-               , precs :: IntMap [Int] -- ^ Succ Node ID -> Prec Node IDs
-               , succs :: IntMap [Int] -- ^ Prec Node Id -> Succ Node IDs
+               , precs :: IntMap [NodeId] -- ^ Succ Node ID -> Prec Node IDs
+               , succs :: IntMap [NodeId] -- ^ Prec Node Id -> Succ Node IDs
                } deriving (Show)
                  
-data Node = Node { nodeID :: Int
+data Node = Node { nodeID :: NodeId
                  , stmts  :: [Stmt]
                  } deriving (Show)
                    
@@ -27,6 +27,15 @@ stmt ::= x = stmt | if (exp) { stmts } else {stmts} |
 exp ::= exp op exp | (exp) | id | exp op | op exp | id (exp, ... exp) 
 -}
 
+type NodeId = Int
+
+buildCFG :: [NodeId]           -- ^ I
+            -> IntMap [NodeId] -- ^ S
+            -> IntMap [Stmt]   -- ^ N
+            -> [Stmt]          -- ^ stmts
+            -> ([NodeId], IntMap [NodeId], IntMap [Stmt])
+
+buildCFG i s n [] = (i,s,n)
 
 {-
 x \not\in lhs(stmts')
@@ -34,6 +43,9 @@ x \not\in lhs(stmts')
 ------------------------------------------------------------- (Assign1)
 {i}, S, N\cup{i->stmts'} |- x=exp; stmts : I, S', N'
 -}
+
+buildCFG i s n (
+
 
 {-
 x \in lhs(stmts')  
@@ -60,8 +72,17 @@ I,S,N\cup { i->stmts'} |- if (cond) { stmts1 } else { stmts2 }; stmts: I',S',N'
 
 {-
 j, k are fresh
-
+N' = N\cup{i->stmts'\cup{while(cond) {stmts1}}}
+{j}, S, N' \cup {j -> {}} |- stmts1, I, S',N''
+{k}, S',N''\cup {k -> {}} |- stmts, I', S'', N'''
 -------------------------------------------------------------------------------------------------- (While)
+{i}, S, N\cup{i->stmts'} |- while (cond) {stmts1}; stmts: I', S'', N'''
 
+-}
+
+
+{-
+-------------------------------------------------------------------------------------------------- (Return)
+{i}, S, N\cup{i->stmts'} |- return exp; stmts: {i},S, N\cup{i->stmts'\cup {return exp}} 
 
 -}
