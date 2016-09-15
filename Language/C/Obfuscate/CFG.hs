@@ -7,7 +7,8 @@ import qualified Language.C.Data.Node as N
 
 -- the data type of the control flow graph
 
-type Stmt = AST.CStatement N.NodeInfo
+-- type Stmt = AST.CStatement N.NodeInfo
+type Stmt = AST.CCompoundBlockItem N.NodeInfo
 
 data CFG = CFG { nodes :: IntMap Node -- ^ NodeID -> Node
                , precs :: IntMap [NodeId] -- ^ Succ Node ID -> Prec Node IDs
@@ -37,6 +38,21 @@ buildCFG :: [NodeId]           -- ^ I
 
 buildCFG i s n [] = (i,s,n)
 
+
+{-
+x \not\in lhs(stmts')
+{i}, S, N \cup { i->stmts' ++ {T x=exp} } |- stmts : I, S', N'
+------------------------------------------------------------- (Decl)
+{i}, S, N\cup{i->stmts'} |- T x=exp; stmts : I, S', N'
+-}
+buildCFG i s n ((AST.CBlockDecl (AST.CDecl 
+                                 declSpecifiers -- e.g. type specifiers
+                                 declInitCExps  -- e.g. [lhs = rhs, ... , ]
+                                 nodeInfo)):stmts) = 
+   
+  
+
+
 {-
 x \not\in lhs(stmts')
 {i}, S, N \cup { i->stmts' ++ {x=exp} } |- stmts : I, S', N'
@@ -44,7 +60,7 @@ x \not\in lhs(stmts')
 {i}, S, N\cup{i->stmts'} |- x=exp; stmts : I, S', N'
 -}
 
-buildCFG i s n (
+
 
 
 {-
