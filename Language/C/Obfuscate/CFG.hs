@@ -1,24 +1,100 @@
 module Language.C.Obfuscate.CFG 
        where
 
-import Data.IntMap
+import Data.Map
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
-
+import Control.Monad.State as M
 -- the data type of the control flow graph
 
--- type Stmt = AST.CStatement N.NodeInfo
-type Stmt = AST.CCompoundBlockItem N.NodeInfo
-
-data CFG = CFG { nodes :: IntMap Node -- ^ NodeID -> Node
-               , precs :: IntMap [NodeId] -- ^ Succ Node ID -> Prec Node IDs
-               , succs :: IntMap [NodeId] -- ^ Prec Node Id -> Succ Node IDs
-               } deriving (Show)
-                 
-data Node = Node { nodeID :: NodeId
-                 , stmts  :: [Stmt]
+type FunDef = AST.CFunctionDef N.NodeInfo
+type Stmt   = AST.CStatement N.NodeInfo
+type CFG = Map NodeId Node                          
+                          
+data Node = Node { stmts  :: [Stmt]
+                 , preds :: [NodeId]
+                 , succs :: [NodeId] 
                  } deriving (Show)
                    
+
+type NodeId = Int
+
+data StateInfo = StateInfo { currMaxNodeId :: NodeId
+                           , cfg :: CFG
+                           , currPreds ::[NodeId]
+                           }
+                 deriving (Show)
+
+type CFGState = M.State StateInfo
+
+
+
+buildCFGfrFunDec :: FunDef -> CFGState ()
+buildCFGfrFunDec (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
+  buildCFGfrStmt stmt {- stmt must be compound -}
+  
+buildCFGfrStmt :: Stmt -> CFGState () 
+buildCFGfrStmt (AST.CLabel label stmt attrs nodeInfo) = 
+  error "labelled stmt not supported."
+buildCFGfrStmt (AST.CCase exp stmt nodeInfo) = 
+  error "case stmt not supported."
+buildCFGfrStmt (AST.CCases lower upper stmt nodeInfo) = 
+  error "range case stmt not supported."
+buildCFGfrStmt (AST.CDefault stmt nodeInfo) = 
+  error "default case stmt not supported."
+buildCFGfrStmt (AST.CExpr mbExp nodeInfo) = 
+  error "expression stmt not supported."
+  
+{-  
+CFG, max, preds |- stmt => CFG', max', preds'
+----------------------------------------------
+CFG, max, preds |- { stmt } => CFG', max', preds'  
+-}
+buildCFGfrStmt (AST.CCompound localLabels blockItems nodeInfo) =   
+  undefined
+
+{-  
+max1 = max + 1
+CFG1 = CFG \update { pred{succ = max1} |  pred <- preds } \union { max1{ stmts =  [ if exp { trueStmt } else { falseStmt } ], succ = [], preds = preds} }
+CFG1, max1, {max1} |- trueStmt => CFG2, max2, preds1
+CFG2, max2, {max1} |- falseStmt => CFG3, max3, preds2
+-------------------------------------------------------------------------------------------
+CFG, max, preds |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, preds1 U preds2  
+-}
+buildCFGfrStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo) =
+  undefined
+buildCFGfrStmt (AST.CSwitch exp swStmt nodeInfo) = 
+  error "switch statmt not supported."
+  -- | switch statement @CSwitch selectorExpr switchStmt@, where
+  -- @switchStmt@ usually includes /case/, /break/ and /default/
+  -- statements
+{-  
+
+--------------------------------------------------------------------
+
+-}
+buildCFGfrStmt (AST.CWhile exp stmt isDoWhile nodeInfo) =   
+  undefined
+buildCFGfrStmt (AST.CFor init exp2 exp3 stmt nodeInfo) =   
+  undefined
+  -- | for statement @CFor init expr-2 expr-3 stmt@, where @init@ is
+  -- either a declaration or initializing expression
+buildCFGfrStmt (AST.CGoto ident nodeInfo) =   
+  undefined
+buildCFGfrStmt (AST.CGotoPtr exp nodeInfo) =   
+  undefined
+  -- | computed goto @CGotoPtr labelExpr@
+buildCFGfrStmt (AST.CCont nodeInfo) = 
+  undefined
+  -- | continue statement
+buildCFGfrStmt (AST.CBreak nodeInfo) =   
+  undefined
+  -- | break statement
+buildCFGfrStmt (AST.CReturn mb_expression modeInfo) = 
+  undefined
+  -- | return statement @CReturn returnExpr@
+buildCFGfrStmt (AST.CAsm asmb_stmt nodeInfo) = 
+  error "asmbly statement not supported."
 
 
 {-
@@ -28,8 +104,8 @@ stmt ::= x = stmt | if (exp) { stmts } else {stmts} |
 exp ::= exp op exp | (exp) | id | exp op | op exp | id (exp, ... exp) 
 -}
 
-type NodeId = Int
 
+{-
 buildCFG :: [NodeId]           -- ^ I
             -> IntMap [NodeId] -- ^ S
             -> IntMap [Stmt]   -- ^ N
@@ -37,23 +113,26 @@ buildCFG :: [NodeId]           -- ^ I
             -> ([NodeId], IntMap [NodeId], IntMap [Stmt])
 
 buildCFG i s n [] = (i,s,n)
-
-
+-}
+-- x must not be in the lhs of the existing CFG node, we don't need to create new CFG node.
 {-
-x \not\in lhs(stmts')
+x  \not\in lhs(stmts') this is definitely
 {i}, S, N \cup { i->stmts' ++ {T x=exp} } |- stmts : I, S', N'
 ------------------------------------------------------------- (Decl)
 {i}, S, N\cup{i->stmts'} |- T x=exp; stmts : I, S', N'
 -}
-buildCFG i s n ((AST.CBlockDecl (AST.CDecl 
-                                 declSpecifiers -- e.g. type specifiers
-                                 declInitCExps  -- e.g. [lhs = rhs, ... , ]
-                                 nodeInfo)):stmts) = 
-   
-  
-
-
 {-
+buildCFG i s n (stmt@(AST.CBlockDecl (AST.CDecl 
+                                      declSpecifiers -- e.g. type specifiers
+                                      declInitCExps  -- e.g. [lhs = rhs, ... , ]
+                                      nodeInfo)):stmts) 
+  | (n!!i) `lhsContains` decInitExps = (i,s, update (\stmts -> Just (stmts++[stmt])) i n)  
+  | otherwise                        = error "variable reinitialized."
+  where lhsContains :: [Stmt] -> [(Maybe (CDeclarator N.NodeInfo), Maybe (CInitializer N.NodeInfo), Maybe (CExpression N.NodeInfo))] -> Bool 
+        lhsContains 
+-}
+-- x is not in the lhs of the existing CFG node, we don't need to create new CFG node.
+{-  
 x \not\in lhs(stmts')
 {i}, S, N \cup { i->stmts' ++ {x=exp} } |- stmts : I, S', N'
 ------------------------------------------------------------- (Assign1)
