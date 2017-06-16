@@ -41,6 +41,12 @@ buildCFGfrFunDec (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) =
 -- CFG, newNodeId, predIds, continuable |- stmt => CFG', newNodeId', predIds', continuable'
 
 buildCFGfrStmt :: Stmt -> CFGState () 
+{-
+CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; }
+CFG1, max, {l}, false |- stmt => CFG2, max2, preds, continuable
+------------------------------------------------------------------------------
+CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
+-}
 buildCFGfrStmt (AST.CLabel label stmt attrs nodeInfo) = 
   error "labelled stmt not supported."
 buildCFGfrStmt (AST.CCase exp stmt nodeInfo) = 
@@ -53,16 +59,16 @@ buildCFGfrStmt (AST.CExpr mbExp nodeInfo) =
   error "expression stmt not supported."
   
 {-  
-CFG, max, preds, continuable |- stmt => CFG', max', preds', continuable
-----------------------------------------------
-CFG, max, preds, continuable |- { stmt } => CFG', max', preds', continuable 
+CFG, max, preds, continuable |- stmt => CFG', max', preds', continuable'
+---------------------------------------------------------------------------
+CFG, max, preds, continuable |- { stmt } => CFG', max', preds', continuable' 
 -}
 buildCFGfrStmt (AST.CCompound localLabels blockItems nodeInfo) =   
   undefined
 
 {-  
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max1} |  pred <- preds } \union { max : { stmts =  [ if exp { goto max1 } else { goto max2 } ], succ = [], preds = preds} }
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : { stmts =  [ if exp { goto max1 } else { goto max2 } ], succ = [], preds = preds} }
 CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
 CFG2, max2, {max}, false |-n falseStmt => CFG3, max3, preds2, _
 -------------------------------------------------------------------------------------------------------------
@@ -77,7 +83,7 @@ buildCFGfrStmt (AST.CSwitch exp swStmt nodeInfo) =
   -- statements
 {-  
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max1} |  pred <- preds } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
 CFG1, max1, {max}, false |-n stmt => CFG2, max2, preds1, _ 
 --------------------------------------------------------------------------------------
 CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
@@ -90,18 +96,35 @@ CFG1 = CFG \update { pred : {stmts = stmt ++ init } }
 CFG1, max, preds, false |- while (exp2) { stmt; exp3 } => CFG2, max', preds', continuable
 ---------------------------------------------------------------------------------------    
 CFG, max, preds, true |- for (init; exp2; exp3) { stmt }  => CFG2, max', preds', continuable
+
+
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds }  \union { max : {stmts = init } } 
+max1 = max + 1
+CFG1, max1, {max}, false |- while (exp2) { stmt; exp3 } => CFG2, max2, preds2, continuable
+---------------------------------------------------------------------------------------    
+CFG, max, preds, false |- for (init; exp2; exp3) { stmt }  => CFG2, max2, preds2, continuable
 -}
-  
+
+
 buildCFGfrStmt (AST.CFor init exp2 exp3 stmt nodeInfo) =   
   undefined
   -- | for statement @CFor init expr-2 expr-3 stmt@, where @init@ is
   -- either a declaration or initializing expression
   
 {-
+CFG1 = CFG \update { pred : {stmts = stmts ++ goto L } } 
+--------------------------------------------------------
+CFG, max, preds, true |- goto L => CFG1, max, preds, false 
 
+max1 = max + 1
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L } } 
+--------------------------------------------------------
+CFG, max, preds, false |- goto L => CFG1, max, preds, false 
 -}
+
 buildCFGfrStmt (AST.CGoto ident nodeInfo) =   
   undefined
+  
 buildCFGfrStmt (AST.CGotoPtr exp nodeInfo) =   
   undefined
   -- | computed goto @CGotoPtr labelExpr@
@@ -111,6 +134,16 @@ buildCFGfrStmt (AST.CCont nodeInfo) =
 buildCFGfrStmt (AST.CBreak nodeInfo) =   
   undefined
   -- | break statement
+{-  
+CFG1 = CFG \update { pred : {stmts = stmts ++ return exp } } 
+--------------------------------------------------------
+CFG, max, preds, true |- return exp  => CFG1, max, preds, false
+
+max1 = max + 1
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = return exp } } 
+--------------------------------------------------------
+CFG, max, preds, false |- return exp => CFG1, max, preds, false 
+-}
 buildCFGfrStmt (AST.CReturn mb_expression modeInfo) = 
   undefined
   -- | return statement @CReturn returnExpr@
