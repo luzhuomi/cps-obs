@@ -4,6 +4,8 @@ module Language.C.Obfuscate.CFG
 import Data.Map
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
+import Language.C.Data.Ident
+
 import Control.Monad.State as M
 -- the data type of the control flow graph
 
@@ -11,13 +13,15 @@ type FunDef = AST.CFunctionDef N.NodeInfo
 type Stmt   = AST.CStatement N.NodeInfo
 type CFG = Map NodeId Node                          
                           
-data Node = Node { stmts  :: [Stmt]
+data Node = Node { stmts  :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
+                 , lhsVars :: [Ident] -- ^ all the variables appearing on the LHS of the assignment stmts
+                 , rhsVars :: [Ident] -- ^ all the variables appearing on the RHS of the assignment stmts
                  , preds :: [NodeId]
                  , succs :: [NodeId] 
                  } deriving (Show)
                    
 
-type NodeId = Int
+type NodeId = Ident
 
 data StateInfo = StateInfo { currMaxNodeId :: NodeId
                            , cfg :: CFG
@@ -33,6 +37,9 @@ buildCFGfrFunDec :: FunDef -> CFGState ()
 buildCFGfrFunDec (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
   buildCFGfrStmt stmt {- stmt must be compound -}
   
+
+-- CFG, newNodeId, predIds, continuable |- stmt => CFG', newNodeId', predIds', continuable'
+
 buildCFGfrStmt :: Stmt -> CFGState () 
 buildCFGfrStmt (AST.CLabel label stmt attrs nodeInfo) = 
   error "labelled stmt not supported."
@@ -46,20 +53,20 @@ buildCFGfrStmt (AST.CExpr mbExp nodeInfo) =
   error "expression stmt not supported."
   
 {-  
-CFG, max, preds |- stmt => CFG', max', preds'
+CFG, max, preds, continuable |- stmt => CFG', max', preds', continuable
 ----------------------------------------------
-CFG, max, preds |- { stmt } => CFG', max', preds'  
+CFG, max, preds, continuable |- { stmt } => CFG', max', preds', continuable 
 -}
 buildCFGfrStmt (AST.CCompound localLabels blockItems nodeInfo) =   
   undefined
 
 {-  
 max1 = max + 1
-CFG1 = CFG \update { pred{succ = max1} |  pred <- preds } \union { max1{ stmts =  [ if exp { trueStmt } else { falseStmt } ], succ = [], preds = preds} }
-CFG1, max1, {max1} |- trueStmt => CFG2, max2, preds1
-CFG2, max2, {max1} |- falseStmt => CFG3, max3, preds2
--------------------------------------------------------------------------------------------
-CFG, max, preds |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, preds1 U preds2  
+CFG1 = CFG \update { pred : {succ = max1} |  pred <- preds } \union { max : { stmts =  [ if exp { goto max1 } else { goto max2 } ], succ = [], preds = preds} }
+CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
+CFG2, max2, {max}, false |-n falseStmt => CFG3, max3, preds2, _
+-------------------------------------------------------------------------------------------------------------
+CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, preds1 U preds2, false
 -}
 buildCFGfrStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo) =
   undefined
@@ -69,16 +76,30 @@ buildCFGfrStmt (AST.CSwitch exp swStmt nodeInfo) =
   -- @switchStmt@ usually includes /case/, /break/ and /default/
   -- statements
 {-  
-
---------------------------------------------------------------------
-
+max1 = max + 1
+CFG1 = CFG \update { pred : {succ = max1} |  pred <- preds } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
+CFG1, max1, {max}, false |-n stmt => CFG2, max2, preds1, _ 
+--------------------------------------------------------------------------------------
+CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
 -}
 buildCFGfrStmt (AST.CWhile exp stmt isDoWhile nodeInfo) =   
   undefined
+  
+{-  
+CFG1 = CFG \update { pred : {stmts = stmt ++ init } } 
+CFG1, max, preds, false |- while (exp2) { stmt; exp3 } => CFG2, max', preds', continuable
+---------------------------------------------------------------------------------------    
+CFG, max, preds, true |- for (init; exp2; exp3) { stmt }  => CFG2, max', preds', continuable
+-}
+  
 buildCFGfrStmt (AST.CFor init exp2 exp3 stmt nodeInfo) =   
   undefined
   -- | for statement @CFor init expr-2 expr-3 stmt@, where @init@ is
   -- either a declaration or initializing expression
+  
+{-
+
+-}
 buildCFGfrStmt (AST.CGoto ident nodeInfo) =   
   undefined
 buildCFGfrStmt (AST.CGotoPtr exp nodeInfo) =   
