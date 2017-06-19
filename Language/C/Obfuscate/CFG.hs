@@ -31,10 +31,11 @@ data StateInfo = StateInfo { currId :: Int
                            , cfg :: CFG
                            , currPreds ::[NodeId]
                            , continuable :: Bool
-                           , stmtUpdates :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
+                           , stmtUpdate :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
                            }
 
-
+labPref :: String
+labPref = "myLabel"
 
 
 data CFGResult a  = CFGError String
@@ -98,7 +99,7 @@ instance CProg (AST.CFunctionDef N.NodeInfo)  where
 
 instance CProg (AST.CStatement N.NodeInfo) where
 {-
-CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; } // goto max is not safe, the goto statement should be updated by the successor 
+CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; } // todo maybe we shall add this goto statement later
 CFG1, max, {l}, false |- stmt => CFG2, max2, preds, continuable
 ------------------------------------------------------------------------------
 CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
@@ -106,15 +107,13 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
   buildCFG (AST.CLabel label stmt attrs nodeInfo) = do 
     { st <- get 
     ; let max        = currId st
-          currNodeId = internalIdent ("obfs"++show max)
+          currNodeId = internalIdent (labPref++show max)
           cfg0       = cfg st 
-          preds      = currPreds st
-          stmtUps    = stmtUpdates st
+          preds0     = currPreds st
           cfgNode    = Node [AST.CBlockStmt $ 
-                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] preds []
-          cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = [label]}) pred g) cfg0 preds
-          cfg1       = M.insert label cfgNode cfg1
-
+                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] preds0 []
+          cfg1       = M.insert label cfgNode $ 
+                       foldl (\g pred -> M.update (\n -> Just n{succs = [label]}) pred g) cfg0 preds0
     ; put st{cfg = cfg1, currPreds=[label], continuable = False}
     ; buildCFG stmt 
     }
@@ -153,32 +152,26 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
       { Just falseStmt -> do 
            { st <- get 
            ; let max        = currId st
-                 currNodeId = internalIdent ("obfs"++show max)          
+                 currNodeId = internalIdent (labPref++show max)          
                  max1       = max + 1
                  cfg0       = cfg st 
-                 preds      = currPreds st
-                 stmtUps    = stmtUpdates st
+                 preds0     = currPreds st
                  -- note: we dont have max2 until we have CFG1
                  -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
                  -- we can give an empty statement to the new CFG node in CFG1 first and update it
                  -- after we have max2,
-                 cfgNode    = Node [] [] [] preds []
-                 cfg1'      = foldl (\g pred -> 
-                                      let stmtUp = case M.lookup pred stmtUps of 
-                                            { Nothing -> \x -> id
-                                            ; Just f  -> f
-                                            }
-                                      in M.update (\n -> Just $ stmtUp currNodeId n) pred g) cfg0 preds
+                 cfgNode    = Node [] [] [] preds0 []
+                 cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = [currNodeId]}) pred g) cfg0 preds0
                  cfg1       = M.insert currNodeId cfgNode cfg1'
-                 stmtUps1   = M.insert currNodeId (\succNodeId -> \n -> n{succs = [succNodeId]}) stmtUps 
-           ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False, stmtUpdates = stmtUps1}
+                              
+           ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
            ; buildCFG trueStmt
            ; st1 <- get
            ; let max2      = currId st1
                  preds1    = currPreds st1
                  s         = AST.CBlockStmt $ AST.CIf exp  
-                             (AST.CGoto (internalIdent ("obfs" ++ show max1)) nodeInfo) 
-                             (Just (AST.CGoto (internalIdent ("obfs" ++ show max2)) nodeInfo)) nodeInfo
+                             (AST.CGoto (internalIdent (labPref ++ show max1)) nodeInfo) 
+                             (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo
                  cfg2      = cfg st1
                  -- add the stmt back to the curr node (If statement)
                  cfg2'     = M.update (\n -> Just n{stmts=[s]}) currNodeId cfg2
@@ -188,22 +181,14 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
            ; let max3      = currId st2
                  preds2    = currPreds st2
                  cfg3      = cfg st2
-                 
            ; put st{cfg = cfg3, currId=max3, currPreds=preds1 ++ preds2, continuable = False}
            }
 {-  
-max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : { stmts =  [ if exp { goto max1 } else { goto max2 } ], succ = [], preds = preds} } 
-CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
-
-
--- todo: max2 might not be the continuation. for instance, if {cond} { if {cond1} { stmt1 } else {stmt2} } else { stmt3 }; stmt4, stmt2 is not aware the next max id goes to stmt3 not the stmt4.
--- fixed: we make the \union { ... } operation as a call-back whenever 
-
+CFG, max, preds, continuable |- if exp { trueStmt } else { nop } => CFG', max', preds', continuable' 
 -------------------------------------------------------------------------------------------------------------
-CFG, max, preds, _ |- if exp { trueStmt }   => CFG2, max2, preds1 , false
+CFG, max, preds, continuable |- if exp { trueStmt }   => CFG', max', preds', continuable' 
 -}                                
-      ; Nothing -> undefined
+      ; Nothing -> buildCFG (AST.CIf exp trueStmt (Just $ AST.CCompound [] [] nodeInfo) nodeInfo) 
       }
   buildCFG (AST.CSwitch exp swStmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ "switch stmt not supported."
@@ -212,14 +197,50 @@ CFG, max, preds, _ |- if exp { trueStmt }   => CFG2, max2, preds1 , false
   -- statements
 {-  
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds ++ preds1 } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
 CFG1, max1, {max}, false |-n stmt => CFG2, max2, preds1, _ 
 --------------------------------------------------------------------------------------
 CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
 -}
-  buildCFG (AST.CWhile exp stmt isDoWhile nodeInfo) =   
-    undefined
-  
+  buildCFG (AST.CWhile exp stmt False nodeInfo) = do -- while
+    { st <- get 
+    ; let max        = currId st
+          currNodeId = internalIdent (labPref++show max)          
+          max1       = max + 1
+          cfg0       = cfg st 
+          preds0     = currPreds st
+          -- note: we dont have max2 and preds1 until we have CFG1
+          -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
+          -- we can give an empty statement to the new CFG node in CFG1 first and update it
+          -- after we have max2,
+          cfgNode    = Node [] [] [] preds0 []
+          cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+          cfg1       = M.insert currNodeId cfgNode cfg1'
+    ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
+    ; buildCFG stmt 
+    ; st1 <- get
+    ; let max2      = currId st1
+          preds1    = currPreds st1
+          s         = AST.CBlockStmt $ AST.CIf exp  
+                      (AST.CGoto (internalIdent (labPref ++ show max1)) nodeInfo) 
+                      (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo
+          cfg2      = cfg st1
+          cfg2'     = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg2 preds1
+          -- add the stmt back to the curr node (If statement)
+          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1}) currNodeId cfg2'
+    ; put st1{cfg = cfg2'', currId=max2, currPreds=[currNodeId], continuable = False}
+    }
+{-  
+CFG, max, preds, continuable |- stmt => CFG1, max1, preds1, false 
+CFG1, max1, preds1, false    |- while (exp) { stmt } => CFG2, max2, preds2, continuable
+--------------------------------------------------------------------------------------
+CFG, max, preds, continuable |- do  { stmt } while (exp) => CFG2, max2, {max}, false
+-}
+                                                  
+  buildCFG (AST.CWhile exp stmt True nodeInfo) = do   -- do ... while
+    { buildCFG stmt
+    ; buildCFG (AST.CWhile exp stmt False nodeInfo)
+    }
 {-  
 CFG1 = CFG \update { pred : {stmts = stmt ++ init } } 
 CFG1, max, preds, false |- while (exp2) { stmt; exp3 } => CFG2, max', preds', continuable
