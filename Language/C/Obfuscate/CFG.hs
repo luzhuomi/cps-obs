@@ -417,35 +417,73 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
 
 instance CProg (AST.CCompoundBlockItem N.NodeInfo) where
   buildCFG (AST.CBlockStmt stmt) = buildCFG stmt
-  buildCFG (AST.CBlockDecl decl) = error "decl not supported"
+  buildCFG (AST.CBlockDecl decl) = buildCFG decl
   buildCFG (AST.CNestedFunDef fundec) = error "nested function not supported"
   
   
   
 instance CProg (AST.CDeclaration N.NodeInfo) where
-{-  
 {-
-CFG1 = CFG \update { pred : {stmts = stmts ++ [ty x = exp[]] } } 
+CFG1 = CFG \update { pred : {stmts = stmts ++ [ty x = exp[]], lhsVars = lhsVars ++ [x] } } 
 --------------------------------------------------------
 CFG, max, preds, true |- ty x = exp[] => CFG1, max, [] , false 
 
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L } } 
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {ty x = exp[] } } 
 --------------------------------------------------------
 CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false 
--}-}
+-}
   
   buildCFG (AST.CDecl specs divs nodeInfo) = do 
     { st <- get
-    ; return ()
+    ; if (continuable st) 
+      then         
+        let cfg0       = cfg st 
+            preds0     = currPreds st
+            s          = AST.CBlockDecl (AST.CDecl specs divs nodeInfo) 
+            lvars      = getLHSVarsFromDecl divs
+            cfg1       = foldl (\g pred -> 
+                                 M.update (\n -> Just n{ stmts=(stmts n) ++ [ s ]
+                                                       , lhsVars = (lhsVars n) ++ lvars }) pred g) cfg0 preds0
+        in do 
+          { put st{cfg = cfg1} }        
+      else 
+        let max        = currId st
+            currNodeId = internalIdent (labPref++show max)          
+            max1       = max + 1
+            cfg0       = cfg st 
+            preds0     = currPreds st
+            s          = AST.CBlockDecl (AST.CDecl specs divs nodeInfo) 
+            lvars      = getLHSVarsFromDecl divs
+            cfgNode    = Node [s] lvars [] preds0 []
+            cfg1'      = foldl (\g pred -> 
+                                 M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1       = M.insert currNodeId cfgNode cfg1'
+        in do 
+          {  put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
   {-
   buildCFG (AST.CStaticAssert expr str nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ "static assert decl not supported."
-  -}
+-}
+  
+  
 posFromNodeInfo :: N.NodeInfo -> String
 posFromNodeInfo (N.OnlyPos pos posLen) = show pos ++ ": \n"
 posFromNodeInfo (N.NodeInfo pos posLen name) = show pos ++ ": \n"
+
+
+getLHSVarsFromDecl :: [(Maybe (AST.CDeclarator a),  -- declarator (may be omitted)
+                        Maybe (AST.CInitializer a), -- optional initialize
+                        Maybe (AST.CExpression a))] -- optional size (const expr)
+                      -> [Ident]
+getLHSVarsFromDecl divs = 
+  concatMap (\(mb_decl, mb_init, mb_ce) ->
+              case mb_decl of 
+                { Just (AST.CDeclr (Just ident) derivedDecl mb_strLit attrs nodeInfo) -> [ident]
+                ; _                                                                   -> [] 
+                }
+            ) divs
 
 
 
