@@ -12,6 +12,12 @@ import Control.Applicative
 import Control.Monad.State as M hiding (State)
 -- the data type of the control flow graph
 
+-- import for testing
+import Language.C (parseCFile, parseCFilePre)
+import Language.C.System.GCC (newGCC)
+import Language.C.Pretty (pretty)
+import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
+
 type FunDef   = AST.CFunctionDef N.NodeInfo
 type Stmt     = AST.CStatement N.NodeInfo
 type CFG      = M.Map NodeId Node                   
@@ -21,8 +27,12 @@ data Node = Node { stmts  :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound
                  , rhsVars :: [Ident] -- ^ all the variables appearing on the RHS of the assignment stmts
                  , preds :: [NodeId]
                  , succs :: [NodeId] 
-                 } deriving (Show)
+                 } 
                    
+
+instance Show Node where
+  show (Node stmts lhs rhs preds succs) = 
+    "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " ++ (show succs) ++ ")\n\n"
 
 type NodeId = Ident
 
@@ -35,6 +45,9 @@ data StateInfo = StateInfo { currId :: Int
                            , continuable :: Bool
                            -- , stmtUpdate :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
                            } deriving Show
+                 
+-- instance Show StateInfo where                 
+--   show (StateInfo cId cfg currPreds continuable) = show cId ++ "\t" ++ show cfg
 
 labPref :: String
 labPref = "myLabel"
@@ -110,7 +123,8 @@ instance CProg (AST.CFunctionDef N.NodeInfo)  where
 
 instance CProg (AST.CStatement N.NodeInfo) where
 {-
-CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; } // todo maybe we shall add this goto statement later
+CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; } 
+// todo maybe we shall add this goto statement later
 CFG1, max, {l}, false |- stmt => CFG2, max2, preds, continuable
 ------------------------------------------------------------------------------
 CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
@@ -381,7 +395,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
         let cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CReturn mb_expression modeInfo
-            cfg1      = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ]}) pred g) cfg0 preds0
+            cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ]}) pred g) cfg0 preds0
         in do 
           { put st{cfg = cfg1, currPreds=[], continuable = False} }        
       else 
@@ -406,12 +420,53 @@ instance CProg (AST.CCompoundBlockItem N.NodeInfo) where
   buildCFG (AST.CBlockDecl decl) = error "decl not supported"
   buildCFG (AST.CNestedFunDef fundec) = error "nested function not supported"
   
-
   
+  
+instance CProg (AST.CDeclaration N.NodeInfo) where
+{-  
+{-
+CFG1 = CFG \update { pred : {stmts = stmts ++ [ty x = exp[]] } } 
+--------------------------------------------------------
+CFG, max, preds, true |- ty x = exp[] => CFG1, max, [] , false 
+
+max1 = max + 1
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L } } 
+--------------------------------------------------------
+CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false 
+-}-}
+  
+  buildCFG (AST.CDecl specs divs nodeInfo) = do 
+    { st <- get
+    ; return ()
+    }
+  {-
+  buildCFG (AST.CStaticAssert expr str nodeInfo) = 
+    fail $ (posFromNodeInfo nodeInfo) ++ "static assert decl not supported."
+  -}
 posFromNodeInfo :: N.NodeInfo -> String
 posFromNodeInfo (N.OnlyPos pos posLen) = show pos ++ ": \n"
 posFromNodeInfo (N.NodeInfo pos posLen name) = show pos ++ ": \n"
 
+
+
+test = do 
+  { let opts = []
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
+  ; case ast of 
+    { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
+         case runCFG fundef of
+           { CFGOk (_, state) -> putStrLn $ show (cfg state)
+           ; CFGError s       -> error s
+           }
+    ; _ -> error "not fundec"
+    }
+  }
+
+errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
+errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
+
+errorOnLeftM :: (Show a) => String -> IO (Either a b) -> IO b
+errorOnLeftM msg action = action >>= errorOnLeft msg
 
 
 {-
