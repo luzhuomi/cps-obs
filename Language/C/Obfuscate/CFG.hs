@@ -1,8 +1,12 @@
 {-# LANGUAGE FlexibleInstances #-} 
+
+-- constructing a control flow graph from a C source file
+
 module Language.C.Obfuscate.CFG 
        where
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -21,6 +25,10 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 type FunDef   = AST.CFunctionDef N.NodeInfo
 type Stmt     = AST.CStatement N.NodeInfo
 type CFG      = M.Map NodeId Node                   
+
+
+lookupCFG :: NodeId -> CFG -> Maybe Node 
+lookupCFG id cfg = M.lookup id cfg
                           
 data Node = Node { stmts  :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                  , lhsVars :: [Ident] -- ^ all the variables appearing on the LHS of the assignment stmts
@@ -32,7 +40,7 @@ data Node = Node { stmts  :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound
 
 instance Show Node where
   show (Node stmts lhs rhs preds succs) = 
-    "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " ++ (show succs) ++ ")\n\n"
+    "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " ++ (show succs) ++  "\n lhsVars: " ++ (show lhs) ++ ")\n"
 
 type NodeId = Ident
 
@@ -149,9 +157,10 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
   buildCFG (AST.CDefault stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " default case stmt not supported."
 {-
-CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lhsVars = lhsVars ++ [x] } } 
+CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lhsVars = lhsVars ++ [x] } }  
+x \not in {v | v \in lhsVars pred, pred \in preds }
 --------------------------------------------------------
-CFG, max, preds, true |-  x = exp => CFG1, max, [] , false 
+CFG, max, preds, true |-  x = exp => CFG1, max, [] , true 
 
 max1 = max + 1
 CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {x = exp} } 
@@ -159,18 +168,51 @@ CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {x = 
 CFG, max, preds, false |- x = exp => CFG1, max1, [], false 
 -}
   
-  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval)) nodeInfo) = do  
+  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1)) nodeInfo) = do  
     { st <- get
-    ; let lhs = getLHSVarFromExp lval
-    ; if (continuable st && not (any (\x -> (lhsVars st) `contains` x) lhs))
-      then do 
-        {
-        }
-      else do 
-        {
-        }          
+    ; let lhs      = getLHSVarFromExp lval
+          cfg0     = cfg st
+          preds0   = currPreds st
+          lhsPreds = S.fromList $ concatMap (\pred -> case (M.lookup pred cfg0) of 
+                                                { Just n -> lhsVars n 
+                                                ; Nothing -> [] 
+                                                }) preds0
+          s        = AST.CBlockStmt $ AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1) ) nodeInfo
+    ; if (continuable st && not (any (\x -> x `S.member` lhsPreds) lhs))
+      then 
+        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lhsVars=(lhsVars n)++lhs}) pred g) cfg0 preds0
+        in do { put st{cfg = cfg1, continuable = True} }   
+
+      else 
+        let max        = currId st
+            currNodeId = internalIdent (labPref++show max)          
+            max1       = max + 1
+            cfgNode    = Node [s] lhs [] preds0 []
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1       = M.insert currNodeId cfgNode cfg1'
+        in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
-  buildCFG (AST.CExpr (Just exp) nodeInfo) = undefined
+  -- not assigment, pretty much the same as the assignment expression except that we don't care about the lhs vars
+  buildCFG (AST.CExpr (Just exp) nodeInfo) =  do  
+    { st <- get
+    ; let cfg0     = cfg st
+          preds0   = currPreds st
+          s        = AST.CBlockStmt $ AST.CExpr (Just exp) nodeInfo
+    ; if (continuable st)
+      then 
+        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ]}) pred g) cfg0 preds0
+        in do { put st{cfg = cfg1, continuable = True} }   
+
+      else 
+        let max        = currId st
+            currNodeId = internalIdent (labPref++show max)          
+            max1       = max + 1
+            cfgNode    = Node [s] [] [] preds0 []
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1       = M.insert currNodeId cfgNode cfg1'
+        in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
+    }
+    
   buildCFG (AST.CExpr Nothing nodeInfo) = do 
     fail $ (posFromNodeInfo nodeInfo) ++ " empty expression stmt not supported." 
   
@@ -490,12 +532,13 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
     fail $ (posFromNodeInfo nodeInfo) ++ "static assert decl not supported."
 -}
   
-  
+-- print position info given the NodeInfo  
 posFromNodeInfo :: N.NodeInfo -> String
 posFromNodeInfo (N.OnlyPos pos posLen) = show pos ++ ": \n"
 posFromNodeInfo (N.NodeInfo pos posLen name) = show pos ++ ": \n"
 
 
+-- aux functions retrieving LHS variables
 getLHSVarsFromDecl :: [(Maybe (AST.CDeclarator a),  -- declarator (may be omitted)
                         Maybe (AST.CInitializer a), -- optional initialize
                         Maybe (AST.CExpression a))] -- optional size (const expr)
@@ -509,10 +552,18 @@ getLHSVarsFromDecl divs =
             ) divs
 
 
+getLHSVarFromExp :: AST.CExpression a -> [Ident]
+getLHSVarFromExp (AST.CComma exps _)          = concatMap getLHSVarFromExp exps
+getLHSVarFromExp (AST.CAssign op lval rval _) = getLHSVarFromExp lval
+getLHSVarFromExp (AST.CVar ident _)           = [ident]
+getLHSVarFromExp (AST.CIndex arr idx _ )      = getLHSVarFromExp arr
+getLHSVarFromExp _                            = [] -- todo to check whether we miss any other cases
+
+
 
 test = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fib.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -530,87 +581,3 @@ errorOnLeftM :: (Show a) => String -> IO (Either a b) -> IO b
 errorOnLeftM msg action = action >>= errorOnLeft msg
 
 
-{-
-stmts ::= stmt | stmt; stmts 
-stmt ::= x = stmt | if (exp) { stmts } else {stmts} | 
-         return exp | exp | while (exp) { stmts } 
-exp ::= exp op exp | (exp) | id | exp op | op exp | id (exp, ... exp) 
--}
-
-
-{-
-buildCFG :: [NodeId]           -- ^ I
-            -> IntMap [NodeId] -- ^ S
-            -> IntMap [Stmt]   -- ^ N
-            -> [Stmt]          -- ^ stmts
-            -> ([NodeId], IntMap [NodeId], IntMap [Stmt])
-
-buildCFG i s n [] = (i,s,n)
--}
--- x must not be in the lhs of the existing CFG node, we don't need to create new CFG node.
-{-
-x  \not\in lhs(stmts') this is definitely
-{i}, S, N \cup { i->stmts' ++ {T x=exp} } |- stmts : I, S', N'
-------------------------------------------------------------- (Decl)
-{i}, S, N\cup{i->stmts'} |- T x=exp; stmts : I, S', N'
--}
-{-
-buildCFG i s n (stmt@(AST.CBlockDecl (AST.CDecl 
-                                      declSpecifiers -- e.g. type specifiers
-                                      declInitCExps  -- e.g. [lhs = rhs, ... , ]
-                                      nodeInfo)):stmts) 
-  | (n!!i) `lhsContains` decInitExps = (i,s, update (\stmts -> Just (stmts++[stmt])) i n)  
-  | otherwise                        = error "variable reinitialized."
-  where lhsContains :: [Stmt] -> [(Maybe (CDeclarator N.NodeInfo), Maybe (CInitializer N.NodeInfo), Maybe (CExpression N.NodeInfo))] -> Bool 
-        lhsContains 
--}
--- x is not in the lhs of the existing CFG node, we don't need to create new CFG node.
-{-  
-x \not\in lhs(stmts')
-{i}, S, N \cup { i->stmts' ++ {x=exp} } |- stmts : I, S', N'
-------------------------------------------------------------- (Assign1)
-{i}, S, N\cup{i->stmts'} |- x=exp; stmts : I, S', N'
--}
-
-
-
-
-{-
-x \in lhs(stmts')  
-j is fresh
-{j}, S \pcup { i-> {j} }, N \cup { i->stmts', j->{x=exp}} |- stmst: I, S',N' 
------------------------------------------------------------------------------(Assign2)
-{i}, S, N\cup{i->stmts'} |- x=exp; stmts : I, S', N'
-
-where
-S \pcup { i->{j} } := S\i \cup { i -> S(i) \cup {j} } 
--}
-       
-
-{-
-j, k, l are fresh
-S' = S \cup{i->{j,k}}
-N' = N \cup { i->stmts' \cup { if (cond) {stmts1} else {stmts2} } }
-{j}, S', N' \cup {j->{}} |- stmts1, I1, S1, N1
-{k}, S', N' \cup {k->{}} |- stmts2, I2, S2, N2
-{l}, S1 \cup S2 \cup { n -> {m} | n \in I1\cup I2 }, N1 \cup N2 \cup {m->{}} |- stmts: I',S',N'
--------------------------------------------------------------------------------------------------- (If)
-I,S,N\cup { i->stmts'} |- if (cond) { stmts1 } else { stmts2 }; stmts: I',S',N'
--}
-
-{-
-j, k are fresh
-N' = N\cup{i->stmts'\cup{while(cond) {stmts1}}}
-{j}, S, N' \cup {j -> {}} |- stmts1, I, S',N''
-{k}, S',N''\cup {k -> {}} |- stmts, I', S'', N'''
--------------------------------------------------------------------------------------------------- (While)
-{i}, S, N\cup{i->stmts'} |- while (cond) {stmts1}; stmts: I', S'', N'''
-
--}
-
-
-{-
--------------------------------------------------------------------------------------------------- (Return)
-{i}, S, N\cup{i->stmts'} |- return exp; stmts: {i},S, N\cup{i->stmts'\cup {return exp}} 
-
--}
