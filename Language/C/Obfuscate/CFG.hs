@@ -148,8 +148,31 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
     fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
   buildCFG (AST.CDefault stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " default case stmt not supported."
-  buildCFG (AST.CExpr mbExp nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ " expression stmt not supported." 
+{-
+CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lhsVars = lhsVars ++ [x] } } 
+--------------------------------------------------------
+CFG, max, preds, true |-  x = exp => CFG1, max, [] , false 
+
+max1 = max + 1
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {x = exp} } 
+--------------------------------------------------------
+CFG, max, preds, false |- x = exp => CFG1, max1, [], false 
+-}
+  
+  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval)) nodeInfo) = do  
+    { st <- get
+    ; let lhs = getLHSVarFromExp lval
+    ; if (continuable st && not (any (\x -> (lhsVars st) `contains` x) lhs))
+      then do 
+        {
+        }
+      else do 
+        {
+        }          
+    }
+  buildCFG (AST.CExpr (Just exp) nodeInfo) = undefined
+  buildCFG (AST.CExpr Nothing nodeInfo) = do 
+    fail $ (posFromNodeInfo nodeInfo) ++ " empty expression stmt not supported." 
   
 {-  
 CFG, max, preds, continuable |- stmt1 => CFG1, max1, preds1, continuable1
@@ -489,7 +512,7 @@ getLHSVarsFromDecl divs =
 
 test = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fib.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
