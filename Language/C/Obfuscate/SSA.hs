@@ -65,9 +65,11 @@ buildDTree cfg =
         -- since the list is sorted from least to largest, we find the first j in rest
         -- such that j `sdom` i
         case find (\(j,doms) -> i `S.member` doms) rest of 
-          { Nothing -> error $ "Fatal: something is wrong, can't find the parent of a node." ++ show i 
+          { Nothing       ->
+               error $ "Fatal: something is wrong, can't find the parent of a node." ++ show i 
           ; Just (j,doms) -> (i,j):(buildCPM rest)
           }
+      pcm = buildPCM ssdom
       
   in undefined
          
