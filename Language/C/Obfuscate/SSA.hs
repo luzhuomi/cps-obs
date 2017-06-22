@@ -5,6 +5,7 @@ module Language.C.Obfuscate.SSA
 
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.List
 
 import Language.C.Obfuscate.CFG 
 import Language.C.Data.Ident
@@ -46,10 +47,15 @@ buildSDom cfg =
              in M.insert ident (allIds S.\\ (S.singleton ident) S.\\ notDominatees) sdom) M.empty idents
 
 
--- ^ dominace tree
-data DTree = DTNode Ident [Ident] 
+-- ^ dominance tree
+data DTree = DTBranch Ident [DTree] 
+           | DTLeaf Ident
            deriving Show
                         
 buildDTree :: CFG -> DTree
-buildDTree 
+buildDTree cfg = 
+  let sdom = buildSDom cfg
+      -- start from the nodes has no dominatees.
+      invDomTree = sortBy (\(n,doms) (m,doms') -> compare (S.size doms) (S.size doms')) $ M.toList sdom
+  in undefined
          
