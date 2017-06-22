@@ -55,7 +55,19 @@ data DTree = DTBranch Ident [DTree]
 buildDTree :: CFG -> DTree
 buildDTree cfg = 
   let sdom = buildSDom cfg
-      -- start from the nodes has no dominatees.
-      invDomTree = sortBy (\(n,doms) (m,doms') -> compare (S.size doms) (S.size doms')) $ M.toList sdom
+      -- sort the idents based on the size of the their sdom size, small to large
+      ssdom = sortBy (\(i,doms) (j,doms') -> compare (S.size doms) (S.size doms')) $ M.toList sdom
+      -- start from the nodes has no dominatees. build a parent-children map
+      -- 
+      buildCPM []           = []
+      buildCPM [(i,_)]      = []
+      buildCPM ((i,_):rest) = 
+        -- since the list is sorted from least to largest, we find the first j in rest
+        -- such that j `sdom` i
+        case find (\(j,doms) -> i `S.member` doms) rest of 
+          { Nothing -> error $ "Fatal: something is wrong, can't find the parent of a node." ++ show i 
+          ; Just (j,doms) -> (i,j):(buildCPM rest)
+          }
+      
   in undefined
          
