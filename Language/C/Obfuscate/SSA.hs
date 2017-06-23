@@ -10,6 +10,30 @@ import Data.List
 import Language.C.Obfuscate.CFG 
 import Language.C.Data.Ident
 
+
+-- import for testing
+import Language.C (parseCFile, parseCFilePre)
+import Language.C.System.GCC (newGCC)
+import Language.C.Pretty (pretty)
+import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
+import qualified Language.C.Syntax.AST as AST
+
+
+
+testSSA = do 
+  { let opts = []
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
+  ; case ast of 
+    { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
+         case runCFG fundef of
+           { CFGOk (_, state) -> putStrLn $ show $ buildDTree (cfg state)
+           ; CFGError s       -> error s
+           }
+    ; _ -> error "not fundec"
+    }
+  }
+
+
                         
 -- ^ reachbility function
 -- given a CFG, a set of nodes to be excluded, compute the set of nodes that are reachable from the source node, by following the path
@@ -48,28 +72,125 @@ buildSDom cfg =
 
 
 -- ^ dominance tree
-data DTree = DTBranch Ident [DTree] 
-           | DTLeaf Ident
+data DTree = DTNode Ident [DTree] 
            deriving Show
+-- ^ another representation in hash table                    
+type DTreeMap = M.Map Ident [Ident]
                         
-buildDTree :: CFG -> DTree
+buildDTree :: CFG -> Maybe (DTree, DTreeMap)
 buildDTree cfg = 
   let sdom = buildSDom cfg
       -- sort the idents based on the size of the their sdom size, small to large
       ssdom = sortBy (\(i,doms) (j,doms') -> compare (S.size doms) (S.size doms')) $ M.toList sdom
-      -- start from the nodes has no dominatees. build a parent-children map
-      -- 
-      buildCPM []           = []
-      buildCPM [(i,_)]      = []
-      buildCPM ((i,_):rest) = 
-        -- since the list is sorted from least to largest, we find the first j in rest
-        -- such that j `sdom` i
+      -- start from the nodes has no dominatees (mostly leaf node eventually). 
+      -- build a parent-child list
+      -- since the list ssdom is sorted from least to largest, we find the first j in rest
+      -- such that j `sdom` i
+      buildPCL []           = []
+      buildPCL [(i,_)]      = []
+      buildPCL ((i,_):rest) = 
         case find (\(j,doms) -> i `S.member` doms) rest of 
           { Nothing       ->
-               error $ "Fatal: something is wrong, can't find the parent of a node." ++ show i 
-          ; Just (j,doms) -> (i,j):(buildCPM rest)
+               error $ "Fatal in buildDTree. can't find the parent of a node." ++ show i 
+          ; Just (j,doms) -> (j,i):(buildPCL rest)
           }
-      pcm = buildPCM ssdom
-      
-  in undefined
+      -- turn the parent child list into a lookup table Parent -> [Child]
+      pcm :: DTreeMap
+      pcm = foldl (\m (p,c) -> case M.lookup p m of  
+                      { Just children -> M.update (\_ -> Just (children ++ [c])) p m
+                      ; Nothing       -> M.insert p [c] m
+                      }) M.empty (buildPCL ssdom)
+      buildTree pid pcm = 
+        case M.lookup pid pcm of 
+          { Nothing -> DTNode pid []
+          ; Just children -> DTNode pid (map (\c -> buildTree c pcm) children)
+          }
+  in if not (null ssdom)   
+     then Just $ (buildTree ((fst . last) ssdom) pcm, pcm)
+     else Nothing
          
+-- ^ dominace frontier
+data DFTable = DFTable { idom :: M.Map Ident Ident -- ^ child to idom 
+                       , df1  :: M.Map Ident [Ident] 
+                       , dfup :: M.Map Ident [Ident]
+                       , df   :: M.Map [Ident]
+                       }
+               deriving Show
+
+
+buildDF :: CFG -> Maybe DFTable 
+buildDF cfg = 
+  case buildDTree cfg of 
+    { Nothing           -> Nothing
+    ; Just (dtree, pcm) ->  
+      -- traversing the dtree in post order
+      -- build the df1 and df, for leaf nodes df == df1
+      -- for non-leaf nodes, df = df1 \union dfup(c) for all child node c.
+      
+      -- DF1(a) is the local dominance frontier for node a. 
+      -- DF1(a) = { b | b \in succ(a), not (a sdom b) }
+      -- e.g. DF1(3) = { 2 } because 2 \in succ(3), but not (3 sdom 2)
+
+      -- Lemma: Let b \in succ(a), a = idom(b) iff a sdom b
+      -- Hence DF1 can be computed easily via the following
+      --  DF1(a) = { b | b \in succ(a), a != idom(b) }
+
+      -- DFup(a) is the upwards dominance frontier for node a.
+      -- DFup(a) = { b | b \in DF(a), not (idom(a) sdom b) }
+
+      -- Similar to DF1
+      -- DFup can be computed easily via the following
+      -- DFup(a) = { b | b \in DF(a), idom(a) = c, idom(b) != c }
+
+      -- DF(a) is the dominance frontier for node a.
+      -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
+      -- Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
+
+      -- def: we extend the definition of DF to set of nodes.
+      -- DF(A) = { b | a \in A, b \in DF(a) }
+
+      
+      let 
+        po :: [Ident]
+        po = postOrder dtree
+        
+        idoms :: M.Map Ident Ident
+        idoms = foldl (\m (p,cs) -> foldl (\m' c -> M.insert c p m') m cs) $ M.toList pcm
+        
+        findDF1 :: Ident -> [Ident]
+        findDF1 a = case M.lookup a cfg of
+          { Nothing -> [] 
+          ; Just n  -> 
+               let bs = succs n 
+               in concatMap (\b -> case M.lookup b idoms of 
+                                { Nothing               -> [] 
+                                ; Just idom | a == idom -> []
+                                            | otherwise -> [b] 
+                                }) bs
+          }                     
+                     
+        findDFup :: Ident -> DFTable -> [Ident]
+        findDFup a dftable = case M.lookup a (df dftable) of 
+          { Nothing -> []
+          ; Just bs -> 
+               concatMap (\b -> 
+                           case (M.lookup b idoms, M.lookup a idoms) of
+                             { (Just idb, Just ida) | idb /= ida -> [b]
+                             ; _                                 -> [] 
+                             }) bs
+          }
+          
+
+      in foldl (\m id -> 
+                 let df1  = findDF1 id  
+                     dfup = findDFup id m
+                 in undefined
+               ) M.empty po
+    }
+  
+
+  
+  
+postOrder :: DTree -> [Ident]  
+postOrder (DTNode ident dts) =  
+  (concatMap postOrder (reverse dts)) ++ [ident]

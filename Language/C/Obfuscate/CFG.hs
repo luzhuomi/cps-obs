@@ -22,6 +22,28 @@ import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
+testCFG = do 
+  { let opts = []
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
+  ; case ast of 
+    { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
+         case runCFG fundef of
+           { CFGOk (_, state) -> putStrLn $ show (cfg state)
+           ; CFGError s       -> error s
+           }
+    ; _ -> error "not fundec"
+    }
+  }
+
+errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
+errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
+
+errorOnLeftM :: (Show a) => String -> IO (Either a b) -> IO b
+errorOnLeftM msg action = action >>= errorOnLeft msg
+
+
+
+
 type FunDef   = AST.CFunctionDef N.NodeInfo
 type Stmt     = AST.CStatement N.NodeInfo
 type CFG      = M.Map NodeId Node                   
@@ -560,24 +582,5 @@ getLHSVarFromExp (AST.CIndex arr idx _ )      = getLHSVarFromExp arr
 getLHSVarFromExp _                            = [] -- todo to check whether we miss any other cases
 
 
-
-test = do 
-  { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
-  ; case ast of 
-    { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
-         case runCFG fundef of
-           { CFGOk (_, state) -> putStrLn $ show (cfg state)
-           ; CFGError s       -> error s
-           }
-    ; _ -> error "not fundec"
-    }
-  }
-
-errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
-errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
-
-errorOnLeftM :: (Show a) => String -> IO (Either a b) -> IO b
-errorOnLeftM msg action = action >>= errorOnLeft msg
 
 
