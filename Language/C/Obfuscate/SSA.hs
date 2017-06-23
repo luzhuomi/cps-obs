@@ -26,7 +26,10 @@ testSSA = do
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
-           { CFGOk (_, state) -> putStrLn $ show $ buildDTree (cfg state)
+           { CFGOk (_, state) -> do 
+                { putStrLn $ show $ buildDTree (cfg state)
+                ; putStrLn $ show $ buildDF (cfg state)
+                }
            ; CFGError s       -> error s
            }
     ; _ -> error "not fundec"
@@ -77,7 +80,7 @@ data DTree = DTNode Ident [DTree]
 -- ^ another representation in hash table                    
 type DTreeMap = M.Map Ident [Ident]
                         
-buildDTree :: CFG -> Maybe (DTree, DTreeMap)
+buildDTree :: CFG -> Maybe (DTree, DTreeMap, SDom)
 buildDTree cfg = 
   let sdom = buildSDom cfg
       -- sort the idents based on the size of the their sdom size, small to large
@@ -106,14 +109,14 @@ buildDTree cfg =
           ; Just children -> DTNode pid (map (\c -> buildTree c pcm) children)
           }
   in if not (null ssdom)   
-     then Just $ (buildTree ((fst . last) ssdom) pcm, pcm)
+     then Just $ (buildTree ((fst . last) ssdom) pcm, pcm, sdom)
      else Nothing
          
 -- ^ dominace frontier
 data DFTable = DFTable { idom :: M.Map Ident Ident -- ^ child to idom 
                        , df1  :: M.Map Ident [Ident] 
                        , dfup :: M.Map Ident [Ident]
-                       , df   :: M.Map [Ident]
+                       , df   :: M.Map Ident [Ident]
                        }
                deriving Show
 
@@ -121,8 +124,8 @@ data DFTable = DFTable { idom :: M.Map Ident Ident -- ^ child to idom
 buildDF :: CFG -> Maybe DFTable 
 buildDF cfg = 
   case buildDTree cfg of 
-    { Nothing           -> Nothing
-    ; Just (dtree, pcm) ->  
+    { Nothing                 -> Nothing
+    ; Just (dtree, pcm, sdom) ->  
       -- traversing the dtree in post order
       -- build the df1 and df, for leaf nodes df == df1
       -- for non-leaf nodes, df = df1 \union dfup(c) for all child node c.
@@ -155,13 +158,14 @@ buildDF cfg =
         po = postOrder dtree
         
         idoms :: M.Map Ident Ident
-        idoms = foldl (\m (p,cs) -> foldl (\m' c -> M.insert c p m') m cs) $ M.toList pcm
+        idoms = foldl (\m (p,cs) -> foldl (\m' c -> M.insert c p m') m cs) M.empty (M.toList pcm)
         
-        findDF1 :: Ident -> [Ident]
-        findDF1 a = case M.lookup a cfg of
+        findDF1 :: Ident -> DFTable -> [Ident]
+        findDF1 a dft = case M.lookup a cfg of
           { Nothing -> [] 
           ; Just n  -> 
-               let bs = succs n 
+               let bs    = succs n 
+                   idoms = idom dft
                in concatMap (\b -> case M.lookup b idoms of 
                                 { Nothing               -> [] 
                                 ; Just idom | a == idom -> []
@@ -179,13 +183,38 @@ buildDF cfg =
                              ; _                                 -> [] 
                              }) bs
           }
-          
+                             
+        findDF :: Ident -> [Ident] -> DFTable -> [Ident]
+        findDF a a_df1 dftable  = 
+          let {- a_df1 = case M.lookup a (df1 dftable) of
+                { Nothing -> []
+                ; Just bs -> bs } -} -- a_df1 needs to be passed in because dftable is partial
+              a_sdom b = case M.lookup a sdom of
+                { Nothing -> False
+                ; Just doms -> b `S.member` doms
+                }
+              cs    = case M.lookup a pcm of 
+                { Nothing -> [] 
+                ; Just xs -> xs 
+                }
+              bs    = concatMap (\c -> case M.lookup c (df dftable) of 
+                                    { Nothing -> []
+                                    ; Just ys -> [ y | y <- ys, not (a_sdom y)]
+                                    }
+                                ) cs
+          in a_df1 ++ bs
+        empDFT = DFTable idoms M.empty M.empty M.empty
 
-      in foldl (\m id -> 
-                 let df1  = findDF1 id  
-                     dfup = findDFup id m
-                 in undefined
-               ) M.empty po
+      in Just $ foldl (\dft id -> 
+                        let df1'  = findDF1  id dft
+                            dfup' = findDFup id dft
+                            df'   = findDF id df1' dft
+                            (DFTable idoms df1s dfups dfs) = dft
+                        in dft{ df1  = (M.insert id df1' df1s)
+                              , dfup = (M.insert id dfup' dfups)
+                              , df   = (M.insert id df' dfs)
+                              }
+                      ) empDFT po
     }
   
 
