@@ -255,8 +255,31 @@ dfplus ids dft =
              dfp s dft = S.fromList (lookupDFs (S.toList s) dft)
              
              
-phiLoc :: Ident -> CFG -> [Ident]             
-
+             
+             
+-- ^ phiLoc given a variable, identify the list of labelled block in SSA to insert the phi
+phiLoc :: Ident -> CFG -> DFTable -> [Ident]             
+phiLoc var cfg dft = 
+  let modded = modLoc var cfg
+  in S.toList (dfplus (S.fromList modded) dft)
+      
+                     
+-- ^ retrieve the blocks from a CFG where a variable is being modified.
+modLoc :: Ident -> CFG -> [Ident]                      
+modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
           
 
+buildSSA :: CFG -> CFG
+buildSSA cfg = 
+  case buildDF cfg of 
+    { Nothing  -> error "failed to build dominance frontier table"
+    ; Just dft -> 
+      let localVars = allVars cfg
+      in undefined
+    }
 
+
+insertGotos :: CFG -> CFG
+insertGotos cfg = undefined
+
+allVars = undefined
