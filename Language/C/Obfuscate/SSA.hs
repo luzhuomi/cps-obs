@@ -9,6 +9,8 @@ import Data.List
 
 import Language.C.Obfuscate.CFG 
 import Language.C.Data.Ident
+import qualified Language.C.Data.Node as N 
+
 
 
 -- import for testing
@@ -269,6 +271,12 @@ modLoc :: Ident -> CFG -> [Ident]
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
           
 
+data LabeledBlock = LB { stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
+                       , nexts :: [NodeId]
+                       }
+                    deriving Show
+
+
 buildSSA :: CFG -> CFG
 buildSSA cfg = 
   case buildDF cfg of 
@@ -282,4 +290,6 @@ buildSSA cfg =
 insertGotos :: CFG -> CFG
 insertGotos cfg = undefined
 
-allVars = undefined
+allVars :: CFG -> [Ident]
+allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lhsVars n) (M.toList cfg)))
+  
