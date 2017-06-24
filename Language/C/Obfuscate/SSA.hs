@@ -149,8 +149,6 @@ buildDF cfg =
       -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
       -- Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
 
-      -- def: we extend the definition of DF to set of nodes.
-      -- DF(A) = { b | a \in A, b \in DF(a) }
 
       
       let 
@@ -218,8 +216,46 @@ buildDF cfg =
     }
   
 
-  
+lookupDF :: Ident -> DFTable -> [Ident]  
+lookupDF id dft = case M.lookup id (df dft) of 
+  { Nothing  -> []
+  ; Just dfs -> dfs 
+  }
+
+
+-- def: we extend the definition of DF to set of nodes.
+-- DF(A) = { b | a \in A, b \in DF(a) }
+
+lookupDFs :: [Ident] -> DFTable -> [Ident]  
+lookupDFs ids dft = concatMap (\id -> lookupDF id dft) ids
+
   
 postOrder :: DTree -> [Ident]  
 postOrder (DTNode ident dts) =  
   (concatMap postOrder (reverse dts)) ++ [ident]
+
+
+{-
+def: DF(1)(A) = DF(A)
+
+def: DF(n)(A) = DF(n-1)(A) \union DF(DF(n-1)(A))
+
+def: DF+(A) = DF(1)(A) \union DF(2)(A) \union ... 
+
+Lemma: DF+(A) is finite. i.e the above reach a fix point.
+-}
+
+dfplus :: S.Set Ident -> DFTable -> S.Set Ident
+dfplus ids dft = 
+  let ids' = dfp ids dft
+  in if (ids' `S.isSubsetOf` ids) && (ids `S.isSubsetOf` ids') 
+     then ids
+     else dfp (ids `S.union` ids') dft
+       where dfp :: S.Set Ident -> DFTable -> S.Set Ident
+             dfp s dft = S.fromList (lookupDFs (S.toList s) dft)
+             
+             
+phiLoc :: Ident -> CFG -> [Ident]             
+          
+
+
