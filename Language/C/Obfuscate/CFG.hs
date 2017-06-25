@@ -52,16 +52,17 @@ type CFG      = M.Map NodeId Node
 lookupCFG :: NodeId -> CFG -> Maybe Node 
 lookupCFG id cfg = M.lookup id cfg
                           
-data Node = Node { stmts  :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
+data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                  , lhsVars :: [Ident] -- ^ all the variables appearing on the LHS of the assignment stmts
                  , rhsVars :: [Ident] -- ^ all the variables appearing on the RHS of the assignment stmts
-                 , preds :: [NodeId]
-                 , succs :: [NodeId] 
+                 , preds   :: [NodeId]
+                 , succs   :: [NodeId]
+                 , isLoop  :: Bool     -- ^ to indicate whether a if node is desugared from a loop (while / for loop)
                  } 
                    
 
 instance Show Node where
-  show (Node stmts lhs rhs preds succs) = 
+  show (Node stmts lhs rhs preds succs loop) = 
     "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " ++ (show succs) ++  "\n lhsVars: " ++ (show lhs) ++ ")\n"
 
 type NodeId = Ident
@@ -166,7 +167,7 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
           cfg0       = cfg st 
           preds0     = currPreds st
           cfgNode    = Node [AST.CBlockStmt $ 
-                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] preds0 []
+                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] preds0 [] False
           cfg1       = M.insert label cfgNode $ 
                        foldl (\g pred -> M.update (\n -> Just n{succs = [label]}) pred g) cfg0 preds0
     ; put st{cfg = cfg1, currPreds=[label], continuable = False}
@@ -209,7 +210,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
         let max        = currId st
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
-            cfgNode    = Node [s] lhs [] preds0 []
+            cfgNode    = Node [s] lhs [] preds0 [] False
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
@@ -229,7 +230,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
         let max        = currId st
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
-            cfgNode    = Node [s] [] [] preds0 []
+            cfgNode    = Node [s] [] [] preds0 [] False
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
@@ -272,7 +273,7 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
                  -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
                  -- we can give an empty statement to the new CFG node in CFG1 first and update it
                  -- after we have max2,
-                 cfgNode    = Node [] [] [] preds0 []
+                 cfgNode    = Node [] [] [] preds0 [] False
                  cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
                  cfg1       = M.insert currNodeId cfgNode cfg1'
                               
@@ -325,7 +326,7 @@ CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
           -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
           -- we can give an empty statement to the new CFG node in CFG1 first and update it
           -- after we have max2,
-          cfgNode    = Node [] [] [] preds0 []
+          cfgNode    = Node [] [] [] preds0 [] True
           cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
           cfg1       = M.insert currNodeId cfgNode cfg1'
     ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
@@ -403,7 +404,7 @@ CFG, max, preds, false |- for (init; exp2; exp3) { stmt }  => CFG2, max2, preds2
               ; Left exp     -> [AST.CBlockStmt (AST.CExpr exp nodeInfo)]
               }
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = [currNodeId]}) pred g) cfg0 preds0
-            cfgNode    = Node ss [] [] preds0 []
+            cfgNode    = Node ss [] [] preds0 [] False
             cfg1       = M.insert currNodeId cfgNode cfg1'
             exp2'      = case exp2 of 
               { Nothing -> AST.CConst (AST.CIntConst (cInteger 1) nodeInfo) -- true
@@ -453,7 +454,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CGoto ident nodeInfo
-            cfgNode    = Node [s] [] [] preds0 []
+            cfgNode    = Node [s] [] [] preds0 [] False
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -492,7 +493,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt  $ AST.CReturn mb_expression modeInfo
-            cfgNode    = Node [s] [] [] preds0 []
+            cfgNode    = Node [s] [] [] preds0 [] False
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -542,7 +543,7 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
             preds0     = currPreds st
             s          = AST.CBlockDecl (AST.CDecl specs divs nodeInfo) 
             lvars      = getLHSVarsFromDecl divs
-            cfgNode    = Node [s] lvars [] preds0 []
+            cfgNode    = Node [s] lvars [] preds0 [] False
             cfg1'      = foldl (\g pred -> 
                                  M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'

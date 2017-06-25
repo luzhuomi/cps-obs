@@ -271,13 +271,25 @@ modLoc :: Ident -> CFG -> [Ident]
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
           
 
-data LabeledBlock = LB { stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
+data LabeledBlock = LB { phi :: [( Ident -- var 
+                                 , [(Ident, Ident)])] -- incoming block x renamed variables
+                       , stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , nexts :: [NodeId]
+                       , loop  :: Bool
                        }
                     deriving Show
+                             
+data SSA = SSA { decls  :: [AST.CDeclaration N.NodeInfo] 
+               , blocks :: M.Map Ident LabeledBlock
+               }
+           deriving Show
+{-
 
 
-buildSSA :: CFG -> CFG
+-}
+
+
+buildSSA :: CFG -> SSA
 buildSSA cfg = 
   case buildDF cfg of 
     { Nothing  -> error "failed to build dominance frontier table"
