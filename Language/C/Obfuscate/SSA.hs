@@ -271,21 +271,41 @@ modLoc :: Ident -> CFG -> [Ident]
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
           
 
-data LabeledBlock = LB { phi :: [( Ident -- var 
-                                 , [(Ident, Ident)])] -- incoming block x renamed variables
+data LabeledBlock = LB { phi :: [( Ident -- ^ var being redefined 
+                                 , [(Ident, Ident)])] -- ^ incoming block x renamed variables
                        , stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , nexts :: [NodeId]
                        , loop  :: Bool
                        }
                     deriving Show
                              
-data SSA = SSA { decls  :: [AST.CDeclaration N.NodeInfo] 
-               , blocks :: M.Map Ident LabeledBlock
+data SSA = SSA { decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration
+               , blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block
                }
            deriving Show
-{-
+{-  The SSA Language
+                  ___    _ _
+(Prog)  p::= t x (t x) { d b }
 
+(Decl)  d::= t x
+                        _
+(Block) b::= l:{s} | l:{i,s}
 
+(Stmts) s::= x = e; s | goto l; | return e; | e; s | if e { s } else { s }
+                     _
+(Phi)   i::= x = phi(g)
+                   _
+(Exp)   e::= v | e(e)
+
+(Labelled args) g::= l:v
+
+(Labels) l::= l0 | l1 | ...
+
+(Values) v::= x | c
+
+(Types) t::= int | bool | t* | t[] | void
+
+(Loop Envs) \delta = (l_if, e, l_t, l_f)
 -}
 
 
@@ -295,6 +315,12 @@ buildSSA cfg =
     { Nothing  -> error "failed to build dominance frontier table"
     ; Just dft -> 
       let localVars = allVars cfg
+          -- build a mapping from label to the 
+          -- set of variables that need to be merged
+          phiLocMap :: M.Map Ident [Ident]
+          phiLocMap = undefined
+          
+          
       in undefined
     }
 
