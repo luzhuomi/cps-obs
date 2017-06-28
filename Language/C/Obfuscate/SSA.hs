@@ -271,10 +271,11 @@ modLoc :: Ident -> CFG -> [Ident]
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
           
 
-data LabeledBlock = LB { phi :: [( Ident -- ^ var being redefined 
-                                 , [(Ident, Ident)])] -- ^ incoming block x renamed variables
+data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
+                                  , [(Ident, Ident)])] -- ^ incoming block x renamed variables
                        , stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
-                       , nexts :: [NodeId]
+                       , lb_succs :: [NodeId]
+                       , lb_preds :: [NodeId]
                        , loop  :: Bool
                        }
                     deriving Show
@@ -315,13 +316,30 @@ buildSSA cfg =
     { Nothing  -> error "failed to build dominance frontier table"
     ; Just dft -> 
       let localVars = allVars cfg
-          -- build a mapping from label to the 
+          -- build a mapping from node label to a 
           -- set of variables that need to be merged
           phiLocMap :: M.Map Ident [Ident]
-          phiLocMap = undefined
+          phiLocMap = foldl (\m (label,v) -> case M.lookup label m of 
+                                { Nothing -> M.insert label [v] m 
+                                ; Just vs -> M.update (\_ -> Just $ vs ++ [v]) label m 
+                                }) M.empty $ do 
+            { var <- localVars
+            ; let phiLocs = phiLoc var cfg dft
+            ; phiLoc <- phiLocs 
+            ; return (phiLoc, var)
+            }
           
+          -- renaming all the variables based on the individual labelled blocks
+          -- and move all the declaration out.
           
-      in undefined
+          oneNode :: SSA -> (Ident, Node) -> SSA
+          oneNode ssa (ident, node) = case node of 
+            { Node statements lvars rvars ps ss isloop -> 
+                 let phis = undefined
+                 in undefined
+            } 
+          
+      in foldl oneNode (SSA [] M.empty) $ M.toList cfg
     }
 
 
