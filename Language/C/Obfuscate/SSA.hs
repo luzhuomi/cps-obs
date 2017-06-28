@@ -6,6 +6,7 @@ module Language.C.Obfuscate.SSA
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.List
+import Data.Maybe (isJust)
 
 import Language.C.Obfuscate.CFG 
 import Language.C.Data.Ident
@@ -113,6 +114,17 @@ buildDTree cfg =
   in if not (null ssdom)   
      then Just $ (buildTree ((fst . last) ssdom) pcm, pcm, sdom)
      else Nothing
+          
+          
+parentOf :: Ident -> DTree -> Maybe Ident
+parentOf lbl (DTNode lbl' dts) = 
+  if lbl `elem` (map (\(DTNode lbl'' _) -> lbl'') dts)
+  then Just lbl'
+  else case filter (\r -> isJust r) $ map (\dt -> parentOf lbl dt) dts of
+    { [] -> Nothing
+    ; (Just p):_ -> Just p
+    }
+            
          
 -- ^ dominace frontier
 data DFTable = DFTable { idom :: M.Map Ident Ident -- ^ child to idom 
@@ -123,99 +135,102 @@ data DFTable = DFTable { idom :: M.Map Ident Ident -- ^ child to idom
                deriving Show
 
 
+
 buildDF :: CFG -> Maybe DFTable 
 buildDF cfg = 
   case buildDTree cfg of 
     { Nothing                 -> Nothing
-    ; Just (dtree, pcm, sdom) ->  
-      -- traversing the dtree in post order
-      -- build the df1 and df, for leaf nodes df == df1
-      -- for non-leaf nodes, df = df1 \union dfup(c) for all child node c.
+    ; Just (dtree, pcm, sdom) -> Just $ buildDF' (dtree, pcm, sdom, cfg) 
+    }
+
+buildDF' :: (DTree, DTreeMap, SDom, CFG) -> DFTable 
+buildDF' (dtree, pcm, sdom, cfg) = 
+  -- traversing the dtree in post order
+  -- build the df1 and df, for leaf nodes df == df1
+  -- for non-leaf nodes, df = df1 \union dfup(c) for all child node c.
       
-      -- DF1(a) is the local dominance frontier for node a. 
-      -- DF1(a) = { b | b \in succ(a), not (a sdom b) }
-      -- e.g. DF1(3) = { 2 } because 2 \in succ(3), but not (3 sdom 2)
+  -- DF1(a) is the local dominance frontier for node a. 
+  -- DF1(a) = { b | b \in succ(a), not (a sdom b) }
+  -- e.g. DF1(3) = { 2 } because 2 \in succ(3), but not (3 sdom 2)
+  
+  -- Lemma: Let b \in succ(a), a = idom(b) iff a sdom b
+  -- Hence DF1 can be computed easily via the following
+  --  DF1(a) = { b | b \in succ(a), a != idom(b) }
+  
+  -- DFup(a) is the upwards dominance frontier for node a.
+  -- DFup(a) = { b | b \in DF(a), not (idom(a) sdom b) }
+  
+  -- Similar to DF1
+  -- DFup can be computed easily via the following
+  -- DFup(a) = { b | b \in DF(a), idom(a) = c, idom(b) != c }
 
-      -- Lemma: Let b \in succ(a), a = idom(b) iff a sdom b
-      -- Hence DF1 can be computed easily via the following
-      --  DF1(a) = { b | b \in succ(a), a != idom(b) }
+  -- DF(a) is the dominance frontier for node a.
+  -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
+  -- Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
 
-      -- DFup(a) is the upwards dominance frontier for node a.
-      -- DFup(a) = { b | b \in DF(a), not (idom(a) sdom b) }
-
-      -- Similar to DF1
-      -- DFup can be computed easily via the following
-      -- DFup(a) = { b | b \in DF(a), idom(a) = c, idom(b) != c }
-
-      -- DF(a) is the dominance frontier for node a.
-      -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
-      -- Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
-
-
-      
-      let 
-        po :: [Ident]
-        po = postOrder dtree
+  let po :: [Ident]
+      po = postOrder dtree
         
-        idoms :: M.Map Ident Ident
-        idoms = foldl (\m (p,cs) -> foldl (\m' c -> M.insert c p m') m cs) M.empty (M.toList pcm)
+      idoms :: M.Map Ident Ident
+      idoms = foldl (\m (p,cs) -> foldl (\m' c -> M.insert c p m') m cs) M.empty (M.toList pcm)
         
-        findDF1 :: Ident -> DFTable -> [Ident]
-        findDF1 a dft = case M.lookup a cfg of
-          { Nothing -> [] 
-          ; Just n  -> 
-               let bs    = succs n 
-                   idoms = idom dft
-               in concatMap (\b -> case M.lookup b idoms of 
-                                { Nothing               -> [] 
-                                ; Just idom | a == idom -> []
-                                            | otherwise -> [b] 
-                                }) bs
-          }                     
-                     
-        findDFup :: Ident -> DFTable -> [Ident]
-        findDFup a dftable = case M.lookup a (df dftable) of 
-          { Nothing -> []
-          ; Just bs -> 
-               concatMap (\b -> 
-                           case (M.lookup b idoms, M.lookup a idoms) of
-                             { (Just idb, Just ida) | idb /= ida -> [b]
-                             ; _                                 -> [] 
-                             }) bs
-          }
+      findDF1 :: Ident -> DFTable -> [Ident]
+      findDF1 a dft = case M.lookup a cfg of
+        { Nothing -> [] 
+        ; Just n  -> 
+             let bs    = succs n 
+                 idoms = idom dft
+             in concatMap (\b -> case M.lookup b idoms of 
+                              { Nothing               -> [] 
+                              ; Just idom | a == idom -> []
+                                          | otherwise -> [b] 
+                              }) bs
+        }                     
+                      
+      findDFup :: Ident -> DFTable -> [Ident]
+      findDFup a dftable = case M.lookup a (df dftable) of 
+        { Nothing -> []
+        ; Just bs -> 
+             concatMap (\b -> 
+                         case (M.lookup b idoms, M.lookup a idoms) of
+                           { (Just idb, Just ida) | idb /= ida -> [b]
+                           ; _                                 -> [] 
+                           }) bs
+        }
                              
-        findDF :: Ident -> [Ident] -> DFTable -> [Ident]
-        findDF a a_df1 dftable  = 
-          let {- a_df1 = case M.lookup a (df1 dftable) of
+      findDF :: Ident -> [Ident] -> DFTable -> [Ident]
+      findDF a a_df1 dftable  = 
+        let {- a_df1 = case M.lookup a (df1 dftable) of
                 { Nothing -> []
                 ; Just bs -> bs } -} -- a_df1 needs to be passed in because dftable is partial
-              a_sdom b = case M.lookup a sdom of
-                { Nothing -> False
-                ; Just doms -> b `S.member` doms
-                }
-              cs    = case M.lookup a pcm of 
-                { Nothing -> [] 
-                ; Just xs -> xs 
-                }
-              bs    = concatMap (\c -> case M.lookup c (df dftable) of 
-                                    { Nothing -> []
-                                    ; Just ys -> [ y | y <- ys, not (a_sdom y)]
-                                    }
-                                ) cs
-          in a_df1 ++ bs
-        empDFT = DFTable idoms M.empty M.empty M.empty
+          a_sdom b = case M.lookup a sdom of
+            { Nothing -> False
+            ; Just doms -> b `S.member` doms
+            }
+          cs    = case M.lookup a pcm of 
+            { Nothing -> [] 
+            ; Just xs -> xs 
+            }
+          bs    = concatMap (\c -> case M.lookup c (df dftable) of 
+                                { Nothing -> []
+                                ; Just ys -> [ y | y <- ys, not (a_sdom y)]
+                                }
+                            ) cs
+        in a_df1 ++ bs
+           
+      empDFT = DFTable idoms M.empty M.empty M.empty
 
-      in Just $ foldl (\dft id -> 
-                        let df1'  = findDF1  id dft
-                            dfup' = findDFup id dft
-                            df'   = findDF id df1' dft
-                            (DFTable idoms df1s dfups dfs) = dft
-                        in dft{ df1  = (M.insert id df1' df1s)
-                              , dfup = (M.insert id dfup' dfups)
-                              , df   = (M.insert id df' dfs)
-                              }
-                      ) empDFT po
-    }
+  in foldl (\dft id -> 
+             let df1'  = findDF1  id dft
+                 dfup' = findDFup id dft
+                 df'   = findDF id df1' dft
+                 (DFTable idoms df1s dfups dfs) = dft
+             in dft{ df1  = (M.insert id df1' df1s)
+                   , dfup = (M.insert id dfup' dfups)
+                   , df   = (M.insert id df' dfs)
+                   }
+           ) empDFT po
+    
   
 
 lookupDF :: Ident -> DFTable -> [Ident]  
@@ -274,8 +289,8 @@ modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) 
 data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
                                   , [(Ident, Ident)])] -- ^ incoming block x renamed variables
                        , stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
-                       , lb_succs :: [NodeId]
                        , lb_preds :: [NodeId]
+                       , lb_succs :: [NodeId]
                        , loop  :: Bool
                        }
                     deriving Show
@@ -312,10 +327,11 @@ data SSA = SSA { decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide glo
 
 buildSSA :: CFG -> SSA
 buildSSA cfg = 
-  case buildDF cfg of 
+  case buildDTree cfg of 
     { Nothing  -> error "failed to build dominance frontier table"
-    ; Just dft -> 
-      let localVars = allVars cfg
+    ; Just (dtree, pcm, sdom) -> 
+      let dft = buildDF' (dtree, pcm, sdom, cfg) 
+          localVars = allVars cfg
           -- build a mapping from node label to a 
           -- set of variables that need to be merged
           phiLocMap :: M.Map Ident [Ident]
@@ -328,19 +344,71 @@ buildSSA cfg =
             ; phiLoc <- phiLocs 
             ; return (phiLoc, var)
             }
-          
+                      
+          -- given a node's label (as the starting point of the search)
+          -- a var, dom tree
+          -- find the label of the node which contains precieding definition of the variables
+          precDef :: Ident -> Ident -> DTree -> CFG -> Ident
+          precDef currLbl var dt cfg = 
+            case M.lookup currLbl phiLocMap of
+              { Just vs | var `elem` vs -> currLbl  -- the var is reassigned through a phi function in the current block
+              ; _                       ->          -- the var could be reassigned locally
+                   case M.lookup currLbl cfg of
+                     { Nothing   -> error $ "Fatal: Label " ++ show currLbl ++ " is not found in the CFG"
+                     ; Just node | var `elem` (lhsVars node) ->  currLbl
+                     ; Just _ | otherwise -> 
+                       case parentOf currLbl dt of 
+                         { Nothing -> error $ "Fatal: Can't find the definition of " ++ show var
+                         ; Just parentLbl -> precDef parentLbl var dt cfg
+                         }
+                     }
+              }
+                    
           -- renaming all the variables based on the individual labelled blocks
           -- and move all the declaration out.
           
-          oneNode :: SSA -> (Ident, Node) -> SSA
-          oneNode ssa (ident, node) = case node of 
-            { Node statements lvars rvars ps ss isloop -> 
-                 let phis = undefined
-                 in undefined
+          eachNode :: SSA -> (Ident, Node) -> SSA
+          eachNode ssa (ident, node) = case node of 
+            { Node statements lvars rvars precLbls succLbls isloop -> 
+                 let phis_ :: [( Ident -- ^ var being redefined 
+                              , [(Ident, Ident)])] -- ^ incoming block x renamed variables 
+                     phis_ = case M.lookup ident phiLocMap of 
+                       { Nothing      -> []
+                       ; Just phiVars -> map (\v -> 
+                                               let lastDefs = map (\precLbl -> (precLbl, precDef precLbl v dtree cfg)) precLbls
+                                               in (v, lastDefs)
+                                                  -- find the preceding node and the renamed variable
+                                             ) phiVars
+                       }
+                             
+                     stmts_ :: [AST.CCompoundBlockItem N.NodeInfo] 
+                     stmts_ = map undefined statements -- todo: undefined
+                              
+                     lb = LB phis_ stmts_ precLbls succLbls isloop
+                 in ssa{blocks = M.insert ident lb (blocks ssa)} -- todo decls
             } 
           
-      in foldl oneNode (SSA [] M.empty) $ M.toList cfg
+      in foldl eachNode (SSA [] M.empty) $ M.toList cfg
     }
+
+
+
+rename :: M.Map Ident Ident -> AST.CCompoundBlockItem N.NodeInfo -> (M.Map Ident Ident, AST.CCompoundBlockItem N.NodeInfo)
+rename env (AST.CBlockStmt stmt) = case stmt of 
+  { AST.CLabel lbl stmt _ _       -> error "can't rename label stmt"
+  ; AST.CCase exp stmt _          -> error "can't rename case statement"
+  ; AST.CCases lower upper stmt _ -> error "can't rename case statement"
+  ; AST.CDefault stmt _           -> error "can't rename default statement"
+  ; AST.CExpr exp nodeInfo        -> 
+    case exp of 
+      { Nothing -> (env, AST.CBlockStmt (AST.CExpr Nothing nodeInfo))
+      ; Just (AST.CAssign op lval rval nodeInfo1) -> undefined
+      } 
+  }
+
+                 
+      
+      
 
 
 insertGotos :: CFG -> CFG
