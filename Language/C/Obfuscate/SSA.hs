@@ -9,6 +9,7 @@ import Data.List
 import Data.Maybe (isJust)
 
 import Language.C.Obfuscate.CFG 
+import Language.C.Obfuscate.Var
 import Language.C.Data.Ident
 import qualified Language.C.Data.Node as N 
 
@@ -392,19 +393,6 @@ buildSSA cfg =
     }
 
 
-
-rename :: M.Map Ident Ident -> AST.CCompoundBlockItem N.NodeInfo -> (M.Map Ident Ident, AST.CCompoundBlockItem N.NodeInfo)
-rename env (AST.CBlockStmt stmt) = case stmt of 
-  { AST.CLabel lbl stmt _ _       -> error "can't rename label stmt"
-  ; AST.CCase exp stmt _          -> error "can't rename case statement"
-  ; AST.CCases lower upper stmt _ -> error "can't rename case statement"
-  ; AST.CDefault stmt _           -> error "can't rename default statement"
-  ; AST.CExpr exp nodeInfo        -> 
-    case exp of 
-      { Nothing -> (env, AST.CBlockStmt (AST.CExpr Nothing nodeInfo))
-      ; Just (AST.CAssign op lval rval nodeInfo1) -> undefined
-      } 
-  }
 
                  
       
