@@ -57,13 +57,122 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; lval' <- update lval
     ; return (AST.CAssign op lval' rval' nodeInfo)
     }
-  update exp = error "todo"
+  rename (AST.CComma exps nodeInfo) = do 
+    { exps' <- mapM rename exps
+    ; return (AST.CComma exps' nodeInfo) 
+    }
+
+  rename (AST.CCond e1 mb_e2 e3 nodeInfo) = do 
+    { e1' <- rename e1
+    ; mb_e2' <- case mb_e2 of 
+      { Nothing -> return Nothing
+      ; Just e2 -> do { e2' <- rename e2
+                      ; return $ Just e2' 
+                      }
+      }
+    ; e3' <- rename e3
+    ; return (AST.CCond e1' mb_e2' e3' nodeInfo)
+    }
+  rename (AST.CBinary op e1 e2 nodeInfo) = do 
+    { e1' <- rename e1
+    ; e2' <- rename e2
+    ; return (AST.CBinary op e1' e2' nodeInfo)
+    }
+  rename (AST.CCast ty e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CCast ty e' nodeInfo)
+    }
+  rename (AST.CUnary op e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CUnary op e' nodeInfo) 
+    }
+  rename (AST.CSizeofExpr e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CSizeofExpr e' nodeInfo) 
+    }
+  rename (AST.CSizeofType t nodeInfo) = return (AST.CSizeofType t nodeInfo)
+  rename (AST.CAlignofExpr e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CAlignofExpr e' nodeInfo)
+    }
+  rename (AST.CAlignofType t nodeInfo) = return (AST.CAlignofType t nodeInfo)
+  rename (AST.CComplexReal e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CComplexReal e' nodeInfo)
+    }
+  rename (AST.CComplexImag e nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CComplexImag e' nodeInfo)
+    }
+  rename (AST.CIndex a e nodeInfo) = do 
+    { a' <- rename a
+    ; e' <- rename e
+    ; return (AST.CIndex a' e' nodeInfo)
+    }
+  rename (AST.CCall f args nodeInfo) = do 
+    { f' <- rename f
+    ; args' <- mapM rename args
+    ; return (AST.CCall f' args' nodeInfo)
+    }
+  rename (AST.CMember e ident isDeRef nodeInfo) = do 
+    { e' <- rename e
+    ; return (AST.CMember e' ident isDeRef nodeInfo) 
+    }
+  rename (AST.CVar ident nodeInfo) = do 
+    { RSt lbl env <- get
+    ; case M.lookup ident env of 
+      { Nothing      -> return (AST.CVar ident nodeInfo) -- unbound means as formal arg
+      ; Just renamed -> return (AST.CVar renamed nodeInfo) 
+      }
+    }      
+  rename (AST.CConst const) = return (AST.CConst const)
+  {-
+  rename (AST.CGenericSelection e declExps nodeInfo) = do 
+    { e' <- rename e
+    ; declExps' <- mapM (\(mb_decl, exp) -> case mb_decl of 
+                            { Nothing -> do 
+                                 { exp' <- rename exp
+                                 ; return (Nothing, exp') 
+                                 }
+                            ; Just decl -> do  -- todo rename decl?
+                                 { exp' <- rename exp
+                                 ; return (Just decl, exp')
+                                 }
+                            }) declExps
+    ; return (AST.CGenericSelection e' declExps' nodeInfo)
+    }
+  -}
+  rename (AST.CStatExpr stmt nodeInfo) = do 
+    { stmt' <- rename stmt
+    ; return (AST.CStatExpr stmt' nodeInfo)
+    }
+  rename (AST.CLabAddrExpr ident nodeInfo) = return (AST.CLabAddrExpr ident nodeInfo) -- todo : check
+  rename (AST.CBuiltinExpr buildin) = return (AST.CBuiltinExpr buildin) -- todo : check
+  
+  update (AST.CVar ident nodeInfo) = do 
+    { RSt lbl env <- get
+    ; let renamed = ident `app` lbl
+          env'    = upsert ident renamed env
+    ; put (RSt lbl env')
+    ; return (AST.CVar renamed nodeInfo)
+    }
+  update (AST.CComma exps nodeInfo) = error "can't update comma expression"
+  update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
+  update exp = error "can't update expression"
   
   
                                  
 
 
+app :: Ident -> Ident -> Ident
+app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
 
+
+upsert :: Ord a =>  a -> b -> M.Map a b -> M.Map a b
+upsert k v m = case M.lookup k m of
+  { Nothing -> M.insert k v m 
+  ; Just u  -> M.update (\_ -> Just v) k m
+  }
 
 -- todo get it wrap up and leave it first.

@@ -576,7 +576,7 @@ getLHSVarsFromDecl divs =
 
 
 getLHSVarFromExp :: AST.CExpression a -> [Ident]
-getLHSVarFromExp (AST.CComma exps _)          = concatMap getLHSVarFromExp exps
+getLHSVarFromExp (AST.CComma exps _)          = concatMap getLHSVarFromExp exps -- todo: fix me
 getLHSVarFromExp (AST.CAssign op lval rval _) = getLHSVarFromExp lval
 getLHSVarFromExp (AST.CVar ident _)           = [ident]
 getLHSVarFromExp (AST.CIndex arr idx _ )      = getLHSVarFromExp arr
