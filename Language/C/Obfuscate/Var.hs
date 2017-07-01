@@ -14,8 +14,9 @@ import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
 -- variable renaming
-data RenameState = RSt { lbl    :: Ident 
-                       , rn_env :: M.Map Ident Ident -- ^ variable -> renamed variable
+data RenameState = RSt { lbl         :: Ident 
+                       , rn_env      :: M.Map Ident Ident -- ^ variable -> renamed variable
+                       , local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ inner declaralation to be made to be function scope after renaming
                        }
                  deriving Show
 
@@ -29,7 +30,15 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     { stmt' <- rename stmt
     ; return $ AST.CBlockStmt stmt' 
     }
-  rename (AST.CBlockDecl decl) = error "todo"
+  rename (AST.CBlockDecl decl) = do 
+    -- turn it into a renamed assignment statement 
+    -- and move the declaration to the global level.
+    { decl' <- rename decl
+    ; let (decls'', stmt) = splitDecl decl'
+    ; RSt lbl rn_env local_decls <- get
+    ; put (RSt lbl rn_env (local_decls ++ decls''))
+    ; return (AST.CBlockStmt stmt)
+    } 
   update (AST.CBlockStmt stmt) = error "todo"
   
 instance Renamable (AST.CStatement N.NodeInfo) where
@@ -50,6 +59,77 @@ instance Renamable (AST.CStatement N.NodeInfo) where
     }
   update stmt = error "todo"
   
+instance Renamable (AST.CDeclaration N.NodeInfo) where  
+  rename decl = case decl of 
+    { AST.CDecl tyspec tripls nodeInfo -> do 
+         { tripls' <- mapM (\(mb_decltr, mb_init, mb_size) -> do 
+                               { mb_decltr' <- case mb_decltr of 
+                                    { Nothing -> return Nothing
+                                    ; Just decltr -> do 
+                                      { decltr' <- rename decltr
+                                      ; return $ Just decltr'
+                                      }
+                                    }
+                               ; mb_init'   <- case mb_init of 
+                                    { Nothing -> return Nothing
+                                    ; Just init -> do 
+                                      { init' <- rename init
+                                      ; return $ Just init'
+                                      }
+                                    }
+                               ; mb_size'   <- case mb_size of
+                                    { Nothing   -> return Nothing
+                                    ; Just size -> do 
+                                      { size' <- rename size
+                                      ; return $ Just size'
+                                      }
+                                    }
+                               ; return (mb_decltr', mb_init', mb_size')
+                               }) tripls
+         ; return (AST.CDecl tyspec tripls' nodeInfo)
+         }
+    -- ; AST.CStaticAssert e lit nodeInfo -> undefined
+    }
+  update decl = error "todo:update declaration"
+
+instance Renamable (AST.CDeclarator N.NodeInfo) where 
+  rename (AST.CDeclr mb_ident derivs mb_lit attrs nodeInfo) = do 
+    { rst <- get
+    ; let env = rn_env rst
+    ; mb_ident' <- case mb_ident of 
+      { Nothing    -> return Nothing 
+      ; Just ident -> case M.lookup ident env of 
+        { Nothing -> -- it is possible that it is not in the env
+             let ident' = ident `app` (lbl rst)
+                 env'   = M.insert ident ident' env
+             in do 
+               { put rst{rn_env=env'} 
+               ; return $ Just ident'
+               }
+        ; Just ident'' -> -- it is possibel that there is another local var with the same name defined somewhere else.
+               let ident' = ident `app` (lbl rst)
+                   env'   = M.update (\_ -> Just ident') ident env
+               in do 
+                 { put rst{rn_env=env'}
+                 ; return $ Just ident'
+                 }
+        }
+      }
+    ; derivs' <- mapM (\deriv -> case deriv of 
+                          { AST.CPtrDeclr ty nodeInfo1 -> return deriv
+                          ; AST.CArrDeclr ty size nodeInfo1 -> do 
+                            { size' <- rename size
+                            ; return (AST.CArrDeclr ty size' nodeInfo1)
+                            }
+                          ; AST.CFunDeclr (Left idents) attrs nodeInfo1 -> return deriv -- todo : check what to do with idents (args?)
+                          ; AST.CFunDeclr (Right (declrs, flag)) attrs nodeInfo1 -> return deriv -- todo: check what to do with the declrs (args?)
+                          }) derivs
+    ; mb_lit' <- return mb_lit
+    ; attrs' <- mapM rename attrs
+    ; return (AST.CDeclr mb_ident' derivs' mb_lit' attrs' nodeInfo) 
+    }
+    
+  update (AST.CDeclr mb_ident deriveds mb_lit attrs nodeInfo) = error "todo:update declarator"
   
 instance Renamable (AST.CExpression N.NodeInfo) where
   rename (AST.CAssign op lval rval nodeInfo) = do 
@@ -119,7 +199,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CMember e' ident isDeRef nodeInfo) 
     }
   rename (AST.CVar ident nodeInfo) = do 
-    { RSt lbl env <- get
+    { st <- get
+    ; let env = rn_env st 
     ; case M.lookup ident env of 
       { Nothing      -> return (AST.CVar ident nodeInfo) -- unbound means as formal arg
       ; Just renamed -> return (AST.CVar renamed nodeInfo) 
@@ -150,10 +231,10 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   rename (AST.CBuiltinExpr buildin) = return (AST.CBuiltinExpr buildin) -- todo : check
   
   update (AST.CVar ident nodeInfo) = do 
-    { RSt lbl env <- get
+    { RSt lbl env decls <- get
     ; let renamed = ident `app` lbl
           env'    = upsert ident renamed env
-    ; put (RSt lbl env')
+    ; put (RSt lbl env' decls)
     ; return (AST.CVar renamed nodeInfo)
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
@@ -167,7 +248,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
 app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
-
+splitDecl :: AST.CDeclaration a -> ([AST.CDeclaration a], AST.CStatement a)
+splitDecl = undefined
 
 upsert :: Ord a =>  a -> b -> M.Map a b -> M.Map a b
 upsert k v m = case M.lookup k m of
