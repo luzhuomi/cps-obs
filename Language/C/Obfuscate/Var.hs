@@ -25,6 +25,20 @@ class Renamable a where
   update :: a -> MS.State RenameState a -- ^ rename variable based on the label and update the copy of the variable in the map
   
   
+instance Renamable a => Renamable [a] where 
+  rename xs = mapM rename xs
+  update xs = mapM update xs
+  
+instance (Renamable a, Renamable b) => Renamable (a,b) where  
+  rename (x,y) = do { x' <- rename x
+                    ; y' <- rename y
+                    ; return (x',y')
+                    }
+  update (x,y) = do { x' <- update x
+                    ; y' <- update y
+                    ; return (x',y')
+                    }
+  
 instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
   rename (AST.CBlockStmt stmt) = do 
     { stmt' <- rename stmt
@@ -98,7 +112,7 @@ instance Renamable (AST.CDeclarator N.NodeInfo) where
     ; let env = rn_env rst
     ; mb_ident' <- case mb_ident of 
       { Nothing    -> return Nothing 
-      ; Just ident -> case M.lookup ident env of 
+      ; Just ident -> case M.lookup ident env of  -- todo : please check again, maybe we should call update ident?
         { Nothing -> -- it is possible that it is not in the env
              let ident' = ident `app` (lbl rst)
                  env'   = M.insert ident ident' env
@@ -106,7 +120,7 @@ instance Renamable (AST.CDeclarator N.NodeInfo) where
                { put rst{rn_env=env'} 
                ; return $ Just ident'
                }
-        ; Just ident'' -> -- it is possibel that there is another local var with the same name defined somewhere else.
+        ; Just ident'' -> -- it is possible that there is another local var with the same name defined somewhere else.
                let ident' = ident `app` (lbl rst)
                    env'   = M.update (\_ -> Just ident') ident env
                in do 
@@ -125,11 +139,76 @@ instance Renamable (AST.CDeclarator N.NodeInfo) where
                           ; AST.CFunDeclr (Right (declrs, flag)) attrs nodeInfo1 -> return deriv -- todo: check what to do with the declrs (args?)
                           }) derivs
     ; mb_lit' <- return mb_lit
-    ; attrs' <- mapM rename attrs
+    ; attrs' <- rename attrs
     ; return (AST.CDeclr mb_ident' derivs' mb_lit' attrs' nodeInfo) 
     }
     
   update (AST.CDeclr mb_ident deriveds mb_lit attrs nodeInfo) = error "todo:update declarator"
+  
+instance Renamable (AST.CInitializer N.NodeInfo) where
+  rename (AST.CInitExpr exp nodeInfo) = do 
+    { exp' <- rename exp
+    ; return (AST.CInitExpr exp' nodeInfo)
+    }
+  rename (AST.CInitList initList nodeInfo) = do 
+    { initList' <- rename initList
+    ; return (AST.CInitList initList' nodeInfo) 
+    }
+  update initalizer = error "todo:update initializer"
+  
+instance Renamable (AST.CPartDesignator N.NodeInfo) where
+  rename (AST.CArrDesig exp nodeInfo) = do 
+    { exp' <- rename exp
+    ; return (AST.CArrDesig exp' nodeInfo) 
+    }
+  rename (AST.CMemberDesig ident nodeInfo) = do 
+    { ident' <- rename ident
+    ; return (AST.CMemberDesig ident' nodeInfo)
+    }
+  rename (AST.CRangeDesig low upp nodeInfo) = do 
+    { low' <- rename low
+    ; upp' <- rename upp
+    ; return (AST.CRangeDesig low' upp' nodeInfo)
+    } 
+  update partDesign = error "todo:update PartDesignator"
+  
+instance Renamable (AST.CAttribute N.NodeInfo) where
+  rename (AST.CAttr ident exps nodeInfo) = do 
+    { ident' <- rename ident
+    ; exps'  <- rename exps
+    ; return (AST.CAttr ident' exps' nodeInfo) 
+    }
+  update attr = error "todo:update attr"
+  
+  
+instance Renamable Ident where  
+  rename ident = do  
+    { st <- get
+    ; let env = rn_env st 
+    ; case M.lookup ident env of 
+      { Nothing      -> return ident -- unbound means as formal arg
+      ; Just renamed -> return renamed
+      }
+    }      
+  update ident = do 
+    { RSt lbl env decls <- get
+    ; let renamed = ident `app` lbl
+          env'    = upsert ident renamed env
+    ; put (RSt lbl env' decls)
+    ; return renamed
+    }
+
+
+                                        
+instance Renamable (AST.CArraySize N.NodeInfo)   where
+  rename (AST.CNoArrSize flag) = return (AST.CNoArrSize flag)
+  rename (AST.CArrSize flag exp) = do 
+    { exp' <- rename exp
+    ; return (AST.CArrSize flag exp')
+    }
+  update arraySize = error "todo: update arraySize"
+  
+  
   
 instance Renamable (AST.CExpression N.NodeInfo) where
   rename (AST.CAssign op lval rval nodeInfo) = do 
@@ -138,7 +217,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CAssign op lval' rval' nodeInfo)
     }
   rename (AST.CComma exps nodeInfo) = do 
-    { exps' <- mapM rename exps
+    { exps' <- rename exps
     ; return (AST.CComma exps' nodeInfo) 
     }
 
@@ -191,7 +270,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     }
   rename (AST.CCall f args nodeInfo) = do 
     { f' <- rename f
-    ; args' <- mapM rename args
+    ; args' <- rename args
     ; return (AST.CCall f' args' nodeInfo)
     }
   rename (AST.CMember e ident isDeRef nodeInfo) = do 
@@ -199,13 +278,9 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CMember e' ident isDeRef nodeInfo) 
     }
   rename (AST.CVar ident nodeInfo) = do 
-    { st <- get
-    ; let env = rn_env st 
-    ; case M.lookup ident env of 
-      { Nothing      -> return (AST.CVar ident nodeInfo) -- unbound means as formal arg
-      ; Just renamed -> return (AST.CVar renamed nodeInfo) 
-      }
-    }      
+    { ident' <- rename ident
+    ; return (AST.CVar ident' nodeInfo)
+    }
   rename (AST.CConst const) = return (AST.CConst const)
   {-
   rename (AST.CGenericSelection e declExps nodeInfo) = do 
@@ -231,11 +306,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   rename (AST.CBuiltinExpr buildin) = return (AST.CBuiltinExpr buildin) -- todo : check
   
   update (AST.CVar ident nodeInfo) = do 
-    { RSt lbl env decls <- get
-    ; let renamed = ident `app` lbl
-          env'    = upsert ident renamed env
-    ; put (RSt lbl env' decls)
-    ; return (AST.CVar renamed nodeInfo)
+    { ident' <- update ident
+    ; return (AST.CVar ident' nodeInfo)
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
@@ -249,7 +321,7 @@ app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
 splitDecl :: AST.CDeclaration a -> ([AST.CDeclaration a], AST.CStatement a)
-splitDecl = undefined
+splitDecl decl = undefined
 
 upsert :: Ord a =>  a -> b -> M.Map a b -> M.Map a b
 upsert k v m = case M.lookup k m of
