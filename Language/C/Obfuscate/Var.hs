@@ -53,7 +53,7 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     ; put (RSt lbl rn_env (local_decls ++ decls''))
     ; return (AST.CBlockStmt stmt)
     } 
-  update (AST.CBlockStmt stmt) = error "todo"
+  update (AST.CBlockStmt stmt) = error "todo:udatte blockstmt"
   
 instance Renamable (AST.CStatement N.NodeInfo) where
   rename stmt = case stmt of 
@@ -337,7 +337,9 @@ splitDecl decl = case decl of
                                       in (ds ++ new_decls, ss ++ new_stmts )
                                     ) ([],[]) tripls 
          in case stmts of 
-           { [ stmt ] -> undefined }
+           { [ stmt ] -> (decls, stmt)
+           ; _ -> (decls, AST.CCompound [] (map AST.CBlockStmt stmts) nodeInfo)
+           }
                                       
     }
 
