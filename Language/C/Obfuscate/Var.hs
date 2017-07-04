@@ -69,9 +69,9 @@ instance Renamable (AST.CStatement N.NodeInfo) where
              ; return (AST.CExpr (Just exp') nodeInfo)
              }
         } 
-    ; _ -> error "todo"
+    ; _ -> error "todo:rename stmt"
     }
-  update stmt = error "todo"
+  update stmt = error "todo:update stmt"
   
 instance Renamable (AST.CDeclaration N.NodeInfo) where  
   rename decl = case decl of 
@@ -321,7 +321,25 @@ app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
 splitDecl :: AST.CDeclaration a -> ([AST.CDeclaration a], AST.CStatement a)
-splitDecl decl = undefined
+splitDecl decl = case decl of 
+    { AST.CDecl tyspec tripls nodeInfo -> 
+         let (decls, stmts) = foldl (\(ds, ss) (mb_decltr, mb_init, mb_size) -> 
+                                      let new_decls = 
+                                            case mb_decltr of 
+                                              { Nothing -> []
+                                              ; Just delctr -> undefined
+                                              }
+                                          new_stmts = 
+                                            case mb_init of 
+                                              { Nothing -> []
+                                              ; Just init -> undefined 
+                                              }
+                                      in (ds ++ new_decls, ss ++ new_stmts )
+                                    ) ([],[]) tripls 
+         in case stmts of 
+           { [ stmt ] -> undefined }
+                                      
+    }
 
 upsert :: Ord a =>  a -> b -> M.Map a b -> M.Map a b
 upsert k v m = case M.lookup k m of
