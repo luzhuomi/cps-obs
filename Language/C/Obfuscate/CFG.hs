@@ -561,6 +561,8 @@ posFromNodeInfo (N.OnlyPos pos posLen) = show pos ++ ": \n"
 posFromNodeInfo (N.NodeInfo pos posLen name) = show pos ++ ": \n"
 
 
+
+-- todo: move these to Var.hs?
 -- aux functions retrieving LHS variables
 getLHSVarsFromDecl :: [(Maybe (AST.CDeclarator a),  -- declarator (may be omitted)
                         Maybe (AST.CInitializer a), -- optional initialize

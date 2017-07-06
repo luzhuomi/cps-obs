@@ -381,6 +381,8 @@ buildSSA cfg =
                                                   -- find the preceding node and the renamed variable
                                              ) phiVars
                        }
+                             -- build the rnaming state from the 
+                     rnState = 
                              
                      stmts_ :: [AST.CCompoundBlockItem N.NodeInfo] 
                      stmts_ = map undefined statements -- todo: undefined

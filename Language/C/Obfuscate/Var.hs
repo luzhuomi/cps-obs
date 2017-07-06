@@ -13,6 +13,10 @@ import qualified Language.C.Data.Node as N
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
+
+renameGenDecls :: 
+
+
 -- variable renaming
 data RenameState = RSt { lbl         :: Ident 
                        , rn_env      :: M.Map Ident Ident -- ^ variable -> renamed variable
@@ -131,9 +135,18 @@ instance Renamable (AST.CStatement N.NodeInfo) where
         ; return (AST.CFor exp_or_decl' mb_term_cond' mb_incr' stmt' nodeInfo)
         }
     ; AST.CGoto id nodeInfo -> return $ AST.CGoto id nodeInfo
-                               
-                           
-    ; _ -> error "todo:rename stmt"
+    ; AST.CGotoPtr exp nodeInfo -> do 
+      { exp' <- rename exp
+      ; return $ AST.CGotoPtr exp' nodeInfo
+      }
+    ; AST.CCont nodeInfo -> return $ AST.CCont nodeInfo
+    ; AST.CBreak nodeInfo -> return $ AST.CBreak nodeInfo 
+    ; AST.CReturn mb_exp nodeInfo -> do 
+      { mb_exp' <- rename mb_exp
+      ; return $ AST.CReturn mb_exp' nodeInfo 
+      }
+    ; AST.CAsm asm_stmt nodeInfo -> return $ AST.CAsm asm_stmt nodeInfo                   
+    -- ; _ -> error "todo:rename stmt"
     }
   update stmt = error "todo:update stmt"
   
