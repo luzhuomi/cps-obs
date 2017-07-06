@@ -38,7 +38,41 @@ instance (Renamable a, Renamable b) => Renamable (a,b) where
                     ; y' <- update y
                     ; return (x',y')
                     }
+instance Renamable a => Renamable (Maybe a) where
+  rename ma = case ma of 
+    { Nothing -> return Nothing 
+    ; Just a  -> do 
+      { a' <- rename a
+      ; return (Just a')
+      }
+    }
+  update ma = case ma of
+    { Nothing -> return Nothing 
+    ; Just a  -> do 
+      { a' <- rename a
+      ; return (Just a')
+      }
+    }
   
+instance (Renamable a, Renamable b) => Renamable (Either a b) where  
+  rename (Left a) = do 
+    { a' <- rename a
+    ; return (Left a')
+    }
+  rename (Right b) = do 
+    { b' <- rename b
+    ; return (Right b')
+    }
+  update (Left a) = do 
+    { a' <- update a
+    ; return (Left a')
+    }
+  update (Right b) = do 
+    { b' <- update b
+    ; return (Right b')
+    }
+  
+
 instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
   rename (AST.CBlockStmt stmt) = do 
     { stmt' <- rename stmt
@@ -48,12 +82,12 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     -- turn it into a renamed assignment statement 
     -- and move the declaration to the global level.
     { decl' <- rename decl
-    ; let (decls'', stmt) = splitDecl decl'
+    ; let (decl'', stmt) = splitDecl decl'
     ; RSt lbl rn_env local_decls <- get
-    ; put (RSt lbl rn_env (local_decls ++ decls''))
+    ; put (RSt lbl rn_env (local_decls ++ [decl'']))
     ; return (AST.CBlockStmt stmt)
     } 
-  update (AST.CBlockStmt stmt) = error "todo:udatte blockstmt"
+  update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
   
 instance Renamable (AST.CStatement N.NodeInfo) where
   rename stmt = case stmt of 
@@ -69,6 +103,36 @@ instance Renamable (AST.CStatement N.NodeInfo) where
              ; return (AST.CExpr (Just exp') nodeInfo)
              }
         } 
+    ; AST.CCompound localLabels blockItems nodeInfo -> do 
+        { blockItems' <- rename blockItems
+        ; return (AST.CCompound localLabels blockItems' nodeInfo)
+        }
+    ; AST.CIf cond iftrue mb_iffalse nodeInfo -> do 
+        { cond'       <- rename cond
+        ; iftrue'     <- rename iftrue
+        ; mb_iffalse' <- rename mb_iffalse 
+        ; return (AST.CIf cond' iftrue' mb_iffalse' nodeInfo)
+        }
+    ; AST.CSwitch exp stmt nodeInfo -> do 
+        { exp'  <- rename exp
+        ; stmt' <- rename stmt
+        ; return (AST.CSwitch exp' stmt' nodeInfo)
+        }
+    ; AST.CWhile exp stmt isDoWhile nodeInfo -> do 
+        { exp'  <- rename exp
+        ; stmt' <- rename stmt
+        ; return (AST.CWhile exp' stmt' isDoWhile nodeInfo) 
+        }
+    ; AST.CFor exp_or_decl mb_term_cond mb_incr stmt nodeInfo -> do
+        { exp_or_decl'  <- rename exp_or_decl
+        ; mb_term_cond' <- rename mb_term_cond
+        ; mb_incr'      <- rename mb_incr
+        ; stmt'         <- rename stmt
+        ; return (AST.CFor exp_or_decl' mb_term_cond' mb_incr' stmt' nodeInfo)
+        }
+    ; AST.CGoto id nodeInfo -> return $ AST.CGoto id nodeInfo
+                               
+                           
     ; _ -> error "todo:rename stmt"
     }
   update stmt = error "todo:update stmt"
@@ -320,25 +384,37 @@ instance Renamable (AST.CExpression N.NodeInfo) where
 app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
-splitDecl :: AST.CDeclaration a -> ([AST.CDeclaration a], AST.CStatement a)
+splitDecl :: AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
 splitDecl decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> 
-         let (decls, stmts) = foldl (\(ds, ss) (mb_decltr, mb_init, mb_size) -> 
-                                      let new_decls = 
-                                            case mb_decltr of 
-                                              { Nothing -> []
-                                              ; Just delctr -> undefined
-                                              }
-                                          new_stmts = 
-                                            case mb_init of 
-                                              { Nothing -> []
-                                              ; Just init -> undefined 
-                                              }
-                                      in (ds ++ new_decls, ss ++ new_stmts )
-                                    ) ([],[]) tripls 
+         let getLVal mb_decltr = case mb_decltr of 
+               { Nothing -> Nothing 
+               ; Just (AST.CDeclr (Just id) derivs mb_lit attrs nodeInf2) -> 
+                 Just (AST.CVar id nodeInf2) -- todo: what to do with the derivs, lit and attrs?
+               }
+             (tripls', stmts) = 
+               foldl (\(ts, ss) (mb_decltr, mb_init, mb_size) -> 
+                       let new_tripl = (mb_decltr, Nothing, mb_size) -- todo: what is size?
+                           new_stmts = 
+                             case mb_init of 
+                               { Nothing   -> []
+                               ; Just (AST.CInitExpr exp nodeInfo1) -> 
+                                    case getLVal mb_decltr of 
+                                      { Nothing   -> []
+                                      ; Just lval -> 
+                                           let op   = AST.CAssignOp 
+                                               -- get the lval from the decltr
+                                               rval = exp -- get the rval from the exp
+                                               assignmt = AST.CAssign op lval rval nodeInfo1
+                                           in [ AST.CExpr (Just assignmt) nodeInfo ] 
+                                      }
+                               ; Just (AST.CInitList iList nodeInfo1) -> error "todo: splitDecl init list is not supported" -- todo: can we do this in an assignment?
+                               }
+                       in (ts ++ [new_tripl], ss ++ new_stmts )
+                     ) ([],[]) tripls 
          in case stmts of 
-           { [ stmt ] -> (decls, stmt)
-           ; _ -> (decls, AST.CCompound [] (map AST.CBlockStmt stmts) nodeInfo)
+           { [ stmt ] -> (AST.CDecl tyspec tripls' nodeInfo, stmt)
+           ; _        -> (AST.CDecl tyspec tripls' nodeInfo, AST.CCompound [] (map AST.CBlockStmt stmts) nodeInfo)
            }
                                       
     }
@@ -349,4 +425,3 @@ upsert k v m = case M.lookup k m of
   ; Just u  -> M.update (\_ -> Just v) k m
   }
 
--- todo get it wrap up and leave it first.
