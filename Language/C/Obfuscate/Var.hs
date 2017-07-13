@@ -13,8 +13,11 @@ import qualified Language.C.Data.Node as N
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
-
-renameGenDecls :: 
+-- ^ top level function
+-- rename variables in block items and generate function scope declarations
+renameBlkItemsGenDecls :: RenameState -> [AST.CCompoundBlockItem N.NodeInfo] ->  ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
+renameBlkItemsGenDecls rstate blkItems = case MS.runState (rename blkItems) rstate of 
+  { (renamedBlkItems, rstate') -> (renamedBlkItems, local_decls rstate') }
 
 
 -- variable renaming
@@ -393,10 +396,11 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   
                                  
 
-
+-- append two identifiers with _
 app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
 
+-- split a declaration into the declaration and a assignment statement
 splitDecl :: AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
 splitDecl decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> 

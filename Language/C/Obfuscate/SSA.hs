@@ -296,8 +296,8 @@ data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined
                        }
                     deriving Show
                              
-data SSA = SSA { decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration
-               , blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block
+data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration
+               , labelled_blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block
                }
            deriving Show
 {-  The SSA Language
@@ -334,8 +334,10 @@ buildSSA cfg =
       let dft = buildDF' (dtree, pcm, sdom, cfg) 
           localVars = allVars cfg
           -- build a mapping from node label to a 
-          -- set of variables that need to be merged
-          phiLocMap :: M.Map Ident [Ident]
+          -- set of variables that need to be merged via phi func 
+          -- (note: variables are not yet renamed)
+          phiLocMap :: M.Map Ident -- node label
+                       [Ident]     -- variable idents
           phiLocMap = foldl (\m (label,v) -> case M.lookup label m of 
                                 { Nothing -> M.insert label [v] m 
                                 ; Just vs -> M.update (\_ -> Just $ vs ++ [v]) label m 
@@ -347,8 +349,8 @@ buildSSA cfg =
             }
                       
           -- given a node's label (as the starting point of the search)
-          -- a var, dom tree
-          -- find the label of the node which contains precieding definition of the variables
+          -- a variable (which is not yet renamed), the dom tree
+          -- to find the label of the node which contains preceding definition of the variable 
           precDef :: Ident -> Ident -> DTree -> CFG -> Ident
           precDef currLbl var dt cfg = 
             case M.lookup currLbl phiLocMap of
@@ -369,26 +371,35 @@ buildSSA cfg =
           -- and move all the declaration out.
           
           eachNode :: SSA -> (Ident, Node) -> SSA
-          eachNode ssa (ident, node) = case node of 
+          eachNode ssa (currLbl, node) = case node of 
             { Node statements lvars rvars precLbls succLbls isloop -> 
-                 let phis_ :: [( Ident -- ^ var being redefined 
-                              , [(Ident, Ident)])] -- ^ incoming block x renamed variables 
-                     phis_ = case M.lookup ident phiLocMap of 
+                 let phis_ :: [( Ident -- ^ var being redefined (not yet renamed)
+                              , [(Ident, Ident)])] -- ^ (incoming block lbl, lbl of preceding blk in which var is redefined)
+                     phis_ = case M.lookup currLbl phiLocMap of 
                        { Nothing      -> []
                        ; Just phiVars -> map (\v -> 
-                                               let lastDefs = map (\precLbl -> (precLbl, precDef precLbl v dtree cfg)) precLbls
+                                               let lastDefs = 
+                                                     map (\precLbl -> 
+                                                           let lblVarDefined =  precDef precLbl v dtree cfg
+                                                           in (precLbl,lblVarDefined)) precLbls
                                                in (v, lastDefs)
                                                   -- find the preceding node and the renamed variable
                                              ) phiVars
                        }
-                             -- build the rnaming state from the 
-                     rnState = 
+                     -- build the renaming state from the phis?
+                     rnState :: RenameState
+                     rnState = let rnEnv :: M.Map Ident Ident  
+                                   rnEnv = undefined
+                               in RSt currLbl rnEnv []
+                                    
                              
-                     stmts_ :: [AST.CCompoundBlockItem N.NodeInfo] 
-                     stmts_ = map undefined statements -- todo: undefined
+                     renamedBlkItems_n_decls :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
+                     renamedBlkItems_n_decls = renameBlkItemsGenDecls rnState statements -- todo: undefined
+                     (renamedBlkItems, new_decls) = renamedBlkItems_n_decls
                               
-                     lb = LB phis_ stmts_ precLbls succLbls isloop
-                 in ssa{blocks = M.insert ident lb (blocks ssa)} -- todo decls
+                     labelled_block = LB phis_ renamedBlkItems precLbls succLbls isloop
+                 in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
+                       , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
           
       in foldl eachNode (SSA [] M.empty) $ M.toList cfg
