@@ -33,6 +33,7 @@ testSSA = do
            { CFGOk (_, state) -> do 
                 { putStrLn $ show $ buildDTree (cfg state)
                 ; putStrLn $ show $ buildDF (cfg state)
+                ; putStrLn $ show $ buildSSA (cfg state)
                 }
            ; CFGError s       -> error s
            }
@@ -386,12 +387,19 @@ buildSSA cfg =
                                                   -- find the preceding node and the renamed variable
                                              ) phiVars
                        }
-                     -- build the renaming state from the phis?
+                     -- build the renaming state from the rhs vars with the precDef
+                     -- or from phis_
                      rnState :: RenameState
                      rnState = let rnEnv :: M.Map Ident Ident  
-                                   rnEnv = undefined
+                                   rnEnv = case  precLbls of  
+                                     { [] -> -- entry block 
+                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvars)
+                                     ; [precLbl] -> -- non-phi block
+                                          M.fromList (map (\var -> (var, var `app` (precDef precLbl var dtree cfg))) rvars)
+                                     ; _ -> -- phi block
+                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvars)
+                                     }
                                in RSt currLbl rnEnv []
-                                    
                              
                      renamedBlkItems_n_decls :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
                      renamedBlkItems_n_decls = renameBlkItemsGenDecls rnState statements -- todo: undefined
