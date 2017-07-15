@@ -362,7 +362,10 @@ buildSSA cfg =
                      ; Just node | var `elem` (lhsVars node) ->  currLbl
                      ; Just _ | otherwise -> 
                        case parentOf currLbl dt of 
-                         { Nothing -> error $ "Fatal: Can't find the definition of " ++ show var
+                         { Nothing -> -- no parent: this could be due to a nested scope var in some inner block of if else or while. 
+                              -- we will move it to block 0 (the init block) 
+                              -- e.g. refer to the fibiter.c, the variable t
+                              currLbl
                          ; Just parentLbl -> precDef parentLbl var dt cfg
                          }
                      }
@@ -373,7 +376,7 @@ buildSSA cfg =
           
           eachNode :: SSA -> (Ident, Node) -> SSA
           eachNode ssa (currLbl, node) = case node of 
-            { Node statements lvars rvars precLbls succLbls isloop -> 
+            { Node statements lvars rvars local_decls precLbls succLbls isloop -> 
                  let phis_ :: [( Ident -- ^ var being redefined (not yet renamed)
                               , [(Ident, Ident)])] -- ^ (incoming block lbl, lbl of preceding blk in which var is redefined)
                      phis_ = case M.lookup currLbl phiLocMap of 
@@ -382,24 +385,26 @@ buildSSA cfg =
                                                let lastDefs = 
                                                      map (\precLbl -> 
                                                            let lblVarDefined =  precDef precLbl v dtree cfg
-                                                           in (precLbl,lblVarDefined)) precLbls
+                                                           in (precLbl, lblVarDefined)) precLbls
                                                in (v, lastDefs)
                                                   -- find the preceding node and the renamed variable
-                                             ) phiVars
+                                             ) [ v |  v <- phiVars, not (v `elem` local_decls) ]
                        }
                      -- build the renaming state from the rhs vars with the precDef
                      -- or from phis_
                      rnState :: RenameState
-                     rnState = let rnEnv :: M.Map Ident Ident  
-                                   rnEnv = case  precLbls of  
+                     rnState = let -- todo, the local_decls should be filtered away from the rhsVars and local_decls should be appended with the current node label
+                                   rnEnvLocal = M.fromList $  map (\var -> (var, var `app` currLbl)) local_decls
+                                   rvarsNotLocal = filter (\var -> not (var `M.member` rnEnvLocal)) rvars
+                                   rnEnv = case precLbls of  
                                      { [] -> -- entry block 
-                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvars)
+                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvarsNotLocal)
                                      ; [precLbl] -> -- non-phi block
-                                          M.fromList (map (\var -> (var, var `app` (precDef precLbl var dtree cfg))) rvars)
+                                          M.fromList (map (\var -> (var, var `app` (precDef precLbl var dtree cfg))) rvarsNotLocal)
                                      ; _ -> -- phi block
-                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvars)
+                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvarsNotLocal)
                                      }
-                               in RSt currLbl rnEnv []
+                               in RSt currLbl (rnEnvLocal `M.union` rnEnv) []
                              
                      renamedBlkItems_n_decls :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
                      renamedBlkItems_n_decls = renameBlkItemsGenDecls rnState statements -- todo: undefined
