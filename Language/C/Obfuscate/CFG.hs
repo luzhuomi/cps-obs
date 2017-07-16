@@ -359,19 +359,37 @@ CFG, max, preds, continuable |- do  { stmt } while (exp) => CFG2, max2, {max}, f
                                                  
                                                  
 {-  
-CFG1 = CFG \update { pred : {stmts = stmt ++ init } | pred <- preds } 
-CFG1, max, preds, false |- while (exp2) { stmt; exp3 } => CFG2, max', preds', continuable
+
+CFG, max, preds, continuable |- init => CFG1, max1, preds1, continuable1 
+CFG1, max1, preds1, continuable1 |- while (exp2) { stmt; exp3 } => CFG2, max2, preds2, continuabl2
 ---------------------------------------------------------------------------------------    
 CFG, max, preds, true |- for (init; exp2; exp3) { stmt }  => CFG2, max', preds', continuable
 
-
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds }  \union { max : {stmts = init } } 
-max1 = max + 1
-CFG1, max1, {max}, false |- while (exp2) { stmt; exp3 } => CFG2, max2, preds2, continuable
----------------------------------------------------------------------------------------    
-CFG, max, preds, false |- for (init; exp2; exp3) { stmt }  => CFG2, max2, preds2, continuable
 -}
 
+
+  buildCFG (AST.CFor init exp2 exp3 stmt nodeInfo) = do 
+    { _ <- case init of 
+         { Right decl   -> buildCFG decl
+         ; Left Nothing -> return ()
+         ; Left exp     -> buildCFG (AST.CExpr exp nodeInfo)
+         } 
+    ; let exp2'      = case exp2 of 
+            { Nothing -> AST.CConst (AST.CIntConst (cInteger 1) nodeInfo) -- true
+            ; Just exp -> exp
+            }
+          stmt'      = case exp3 of 
+            { Nothing -> stmt
+            ; Just exp -> appStmt stmt (AST.CExpr exp3 nodeInfo)
+            }
+    ; buildCFG (AST.CWhile exp2' stmt' False nodeInfo)
+    }
+    where appStmt stmt1 stmt2 = case stmt1 of
+            { AST.CCompound localLabels blockItems nodeInfo1 -> AST.CCompound localLabels (blockItems ++ [AST.CBlockStmt stmt2]) nodeInfo1
+            ; _ -> AST.CCompound [] [AST.CBlockStmt stmt1, AST.CBlockStmt stmt2] nodeInfo 
+            }
+
+{-
   buildCFG (AST.CFor init exp2 exp3 stmt nodeInfo) = do 
     { st <- get
     ; if not (continuable st) 
@@ -429,7 +447,7 @@ CFG, max, preds, false |- for (init; exp2; exp3) { stmt }  => CFG2, max2, preds2
             }
   -- | for statement @CFor init expr-2 expr-3 stmt@, where @init@ is
   -- either a declaration or initializing expression
-  
+-}  
 {-
 CFG1 = CFG \update { pred : {stmts = stmts ++ [goto L] } } 
 --------------------------------------------------------
