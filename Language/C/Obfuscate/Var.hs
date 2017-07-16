@@ -15,9 +15,9 @@ import Language.C.Data.Ident
 
 -- ^ top level function
 -- rename variables in block items and generate function scope declarations
-renameBlkItemsGenDecls :: RenameState -> [AST.CCompoundBlockItem N.NodeInfo] ->  ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
-renameBlkItemsGenDecls rstate blkItems = case MS.runState (rename blkItems) rstate of 
-  { (renamedBlkItems, rstate') -> (renamedBlkItems, local_decls rstate') }
+renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo])
+renamePure rstate x = case MS.runState (rename x) rstate of 
+  { (y, rstate') -> (y, local_decls rstate') }
 
 
 -- variable renaming
@@ -88,11 +88,11 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
   rename (AST.CBlockDecl decl) = do 
     -- turn it into a renamed assignment statement 
     -- and move the declaration to the global level.
-    { decl' <- rename decl
-    ; let (decl'', stmt) = splitDecl decl'
+    { let (decl', stmt) = splitDecl decl --split the decl out first.
+    ; stmt' <- rename stmt
     ; RSt lbl rn_env local_decls <- get
-    ; put (RSt lbl rn_env (local_decls ++ [decl'']))
-    ; return (AST.CBlockStmt stmt)
+    ; put (RSt lbl rn_env (local_decls ++ [decl']))
+    ; return (AST.CBlockStmt stmt')
     } 
   update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
   
@@ -130,6 +130,8 @@ instance Renamable (AST.CStatement N.NodeInfo) where
         ; stmt' <- rename stmt
         ; return (AST.CWhile exp' stmt' isDoWhile nodeInfo) 
         }
+    -- no longer requires CFor, which should be desugared to init then CWhile
+    {-                                                
     ; AST.CFor exp_or_decl mb_term_cond mb_incr stmt nodeInfo -> do
         { exp_or_decl'  <- rename exp_or_decl
         ; mb_term_cond' <- rename mb_term_cond
@@ -137,6 +139,7 @@ instance Renamable (AST.CStatement N.NodeInfo) where
         ; stmt'         <- rename stmt
         ; return (AST.CFor exp_or_decl' mb_term_cond' mb_incr' stmt' nodeInfo)
         }
+    -}
     ; AST.CGoto id nodeInfo -> return $ AST.CGoto id nodeInfo
     ; AST.CGotoPtr exp nodeInfo -> do 
       { exp' <- rename exp
@@ -153,6 +156,13 @@ instance Renamable (AST.CStatement N.NodeInfo) where
     }
   update stmt = error "todo:update stmt"
   
+{- 
+ -- Renaming declaration is no longer needed except for the last update in function buildSSA
+ -- 
+ -- In the rest of the main process
+ -- declarations are splited into declaration w/o initialization (which will be collected at function scoped) and initialization stmt
+ -- only the initialization will be renamed
+-}
 instance Renamable (AST.CDeclaration N.NodeInfo) where  
   rename decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> do 

@@ -407,21 +407,26 @@ buildSSA cfg =
                                in RSt currLbl (rnEnvLocal `M.union` rnEnv) []
                              
                      renamedBlkItems_n_decls :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
-                     renamedBlkItems_n_decls = renameBlkItemsGenDecls rnState statements -- todo: undefined
+                     renamedBlkItems_n_decls = renamePure rnState statements 
                      (renamedBlkItems, new_decls) = renamedBlkItems_n_decls
                               
                      labelled_block = LB phis_ renamedBlkItems precLbls succLbls isloop
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
-          
-      in foldl eachNode (SSA [] M.empty) $ M.toList cfg
+          ssa =  foldl eachNode (SSA [] M.empty) $ M.toList cfg
+      in ssa{scoped_decls = map (\decl -> renameLabel0 decl) (scoped_decls ssa)}  -- the scoped_delcs were not yet renamed.
     }
 
 
 
                  
-      
+renameLabel0 :: AST.CDeclaration N.NodeInfo ->  AST.CDeclaration N.NodeInfo
+renameLabel0 decl = 
+  let label0 = internalIdent $ labPref ++ "0" 
+      rnState = RSt label0 M.empty [] 
+  in case renamePure rnState decl of 
+    { (decl', rstate') -> decl' }
       
 
 
