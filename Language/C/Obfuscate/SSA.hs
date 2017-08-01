@@ -297,6 +297,8 @@ data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined
                        }
                     deriving Show
                              
+-- ^ a SSA function declaration AST. We only care about the body of the function. We 
+-- apply translation on individual function.
 data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration
                , labelled_blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block
                }
