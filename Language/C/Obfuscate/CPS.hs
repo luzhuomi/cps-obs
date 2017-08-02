@@ -177,7 +177,12 @@ ssa2cps :: SSA -> CPS
 ssa2cps (SSA scopedDecls labelledBlocks) = undefined
 
 
-mkContext :: [AST.CDeclaration N.NodeInfo] -> 
+mkContext :: [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
+mkContext decls = 
+  let ctxtName = undefined
+      tyDef = AST.CStorageSpec (AST.CTypedef N.undefNode)
+      structDef = undefined
+  in AST.CDecl [tyDef, structDef] [(Just undefined, Nothing, Nothing)] N.undefNode
 
 
 {-
