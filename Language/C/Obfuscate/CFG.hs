@@ -46,11 +46,13 @@ errorOnLeftM msg action = action >>= errorOnLeft msg
 
 type FunDef   = AST.CFunctionDef N.NodeInfo
 type Stmt     = AST.CStatement N.NodeInfo
-type CFG      = M.Map NodeId Node                   
+type CFG      = M.Map NodeId Node
 
 
 lookupCFG :: NodeId -> CFG -> Maybe Node 
 lookupCFG id cfg = M.lookup id cfg
+
+
                           
 data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                  , lhsVars :: [Ident] -- ^ all the variables appearing on the LHS of the assignment stmts

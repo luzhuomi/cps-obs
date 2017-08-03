@@ -1,7 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances #-}
 module Language.C.Obfuscate.CPS
        where
-
+import Data.Char
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -173,14 +173,24 @@ P1 = void f1 (void => void k) { B1 }
 -- 1. the top function's type signature is not captured within SSA
 -- 2. \Delta is captured as the loop flag in LabaledBlock
 -- 3. there is no lambda expression, closure needs to be created as a context
-ssa2cps :: SSA -> CPS 
-ssa2cps (SSA scopedDecls labelledBlocks) = undefined
+ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
+ssa2cps fundef (SSA scopedDecls labelledBlocks) = 
+  let funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
+      context = mkContext (funName ++ "Ctxt") scopedDecls
+  in undefined
+
+getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
+getFunName (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getDeclrName declarator
+
+getDeclrName :: (AST.CDeclarator N.NodeInfo) -> Maybe String
+getDeclrName (AST.CDeclr Nothing decltrs mb_strLtr attrs nodeInfo) = Nothing
+getDeclrName (AST.CDeclr (Just (Ident str _ _)) decltrs mb_strLtr attrs nodeInfo)  = Just str
 
 
-mkContext :: [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext decls = 
-  let structName  = undefined
-      ctxtAlias = AST.CDecl 
+mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
+mkContext name decls = 
+  let structName  = internalIdent name
+      ctxtAlias = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs     = []
       decls'    = decls
       tyDef     = AST.CStorageSpec (AST.CTypedef N.undefNode)
