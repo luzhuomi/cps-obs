@@ -2,6 +2,7 @@
 module Language.C.Obfuscate.CPS
        where
 import Data.Char
+import qualified Data.Map as M
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -66,11 +67,12 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 data CPS = CPS { cps_decls :: [AST.CDeclaration N.NodeInfo]  -- ^ main function decls
                , cps_stmts :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function stmts
                , cps_funcs :: [AST.CFunctionDef N.NodeInfo] -- ^ generated auxillary functions
+               , cps_ctxt  :: AST.CDeclaration N.NodeInfo -- ^ the context for the closure
                } deriving Show
                           
                           
                           
-
+{-
 class CPSize ssa cps where
   cps_trans :: ssa -> cps 
   
@@ -155,7 +157,38 @@ x => X
 instance CPSize (AST.CDeclarator N.NodeInfo) (AST.CDeclarator N.NodeInfo) where
   cps_trans declr@(AST.CDeclr mb_ident derivedDecltrs mb_cstrLtr attrs nodeInfo) = declr 
 
+-}
 
+
+{- K, \bar{\Delta} |- \bar{b} => \bar{P}
+translating the labeled blocks to function decls
+
+
+K, \bar{\Delta}, \bar{b}  |- b_i => P_i
+-----------------------------------
+K, \bar{\Delta} |- \bar{b} => \bar{P}
+-}
+
+cps_trans_lbs :: Ident -> -- ^ K, the continuation
+                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                 M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                 [AST.CFunctionDef N.NodeInfo] 
+cps_trans_lbs k lb_map = map (\(id,lb) -> cps_trans_lb k lb_map id lb) (M.toList lb_map)
+
+{- K, \bar{\Delta}, \bar{b}  |- b => P
+
+
+-------------------------------------------
+K, \bar{\Delta}, \bar{b}  |- b => P
+-}
+
+cps_trans_lb :: Ident -> -- ^ K
+                -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                Ident ->  -- ^ label for the current block
+                LabeledBlock ->  -- ^ the block
+                AST.CFunctionDef N.NodeInfo
+cps_trans_lb k lb_map ident lb = undefined
 
 
 
@@ -177,6 +210,7 @@ ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS
 ssa2cps fundef (SSA scopedDecls labelledBlocks) = 
   let funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
       context = mkContext (funName ++ "Ctxt") scopedDecls
+      
   in undefined
 
 getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
@@ -242,4 +276,3 @@ CTranslUnit
 
 -}
 
-cps_trans_lb = undefined
