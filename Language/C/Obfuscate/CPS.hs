@@ -8,6 +8,7 @@ import qualified Language.C.Data.Node as N
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
+import Language.C.Obfuscate.Var
 import Language.C.Obfuscate.CFG 
 import Language.C.Obfuscate.SSA
 
@@ -160,36 +161,64 @@ instance CPSize (AST.CDeclarator N.NodeInfo) (AST.CDeclarator N.NodeInfo) where
 -}
 
 
-{- K, \bar{\Delta} |- \bar{b} => \bar{P}
+{- fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
 translating the labeled blocks to function decls
 
 
-K, \bar{\Delta}, \bar{b}  |- b_i => P_i
+fn, K, \bar{\Delta}, \bar{b}  |- b_i => P_i
 -----------------------------------
-K, \bar{\Delta} |- \bar{b} => \bar{P}
+fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
 -}
 
-cps_trans_lbs :: Ident -> -- ^ K, the continuation
+cps_trans_lbs :: Ident ->  -- ^ top level function name
+                 Ident -> -- ^ K, the continuation
                  -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                  M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                  [AST.CFunctionDef N.NodeInfo] 
-cps_trans_lbs k lb_map = map (\(id,lb) -> cps_trans_lb k lb_map id lb) (M.toList lb_map)
+cps_trans_lbs fname k lb_map = map (\(id,lb) -> cps_trans_lb fname k lb_map id lb) (M.toList lb_map)
 
-{- K, \bar{\Delta}, \bar{b}  |- b => P
+{- fn, K, \bar{\Delta}, \bar{b}  |- b => P -}
 
 
--------------------------------------------
-K, \bar{\Delta}, \bar{b}  |- b => P
--}
-
-cps_trans_lb :: Ident -> -- ^ K
+cps_trans_lb :: Ident ->  -- ^ top level function name
+                Ident -> -- ^ K
                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                 M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                 Ident ->  -- ^ label for the current block
                 LabeledBlock ->  -- ^ the block
                 AST.CFunctionDef N.NodeInfo
-cps_trans_lb k lb_map ident lb = undefined
 
+{-
+K, \bar{\Delta}, \bar{b} |- s => S
+----------------------------------------------------------------- (LabBlk)
+fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i() { S } 
+
+K, \bar{\Delta}, \bar{b} |- s => S
+----------------------------------------------------------------- (PhiBlk)
+fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i() { S S}
+
+-}
+
+
+cps_trans_lb  fname k lb_map ident lb = 
+  let stmt' =  AST.CCompound [] (cps_trans_stmts k lb_map (lb_stmts lb)) N.undefNode
+      fname' = fname `app` ident
+      tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
+      declrs = []
+      decltrs = []
+      mb_strLitr = Nothing
+      attrs  =  []
+  in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
+    
+     
+     
+cps_trans_stmts :: Ident -> -- ^ K
+                -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
+                [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_stmts k lb_map stmts = undefined
+     
 
 
 {-

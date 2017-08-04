@@ -290,7 +290,7 @@ modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) 
 
 data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
                                   , [(Ident, Ident)])] -- ^ incoming block x renamed variables
-                       , stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
+                       , lb_stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , lb_preds :: [NodeId]
                        , lb_succs :: [NodeId]
                        , loop  :: Bool
