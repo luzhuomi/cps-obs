@@ -189,19 +189,19 @@ cps_trans_lb :: Ident ->  -- ^ top level function name
                 AST.CFunctionDef N.NodeInfo
 
 {-
-K, \bar{\Delta}, \bar{b} |- s => S
+fn, K, \bar{\Delta}, \bar{b} |- s => S
 ----------------------------------------------------------------- (LabBlk)
 fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i() { S } 
 
-K, \bar{\Delta}, \bar{b} |- s => S
------------------------------------------------------------------ (PhiBlk)
-fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i() { S S}
+fn, K, \bar{\Delta}, \bar{b} |- s => S
+--------------------------------------------------------------------------- (PhiBlk)
+fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i() { S }
 
 -}
 
 
 cps_trans_lb  fname k lb_map ident lb = 
-  let stmt' =  AST.CCompound [] (cps_trans_stmts k lb_map (lb_stmts lb)) N.undefNode
+  let stmt' =  AST.CCompound [] (cps_trans_stmts fname k lb_map ident (lb_stmts lb)) N.undefNode
       fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
@@ -212,12 +212,26 @@ cps_trans_lb  fname k lb_map ident lb =
     
      
      
-cps_trans_stmts :: Ident -> -- ^ K
-                -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
-                M.Map Ident LabeledBlock ->  -- ^ \bar{b}
-                [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
-                [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_stmts k lb_map stmts = undefined
+cps_trans_stmts :: Ident -> -- ^ fname 
+                   Ident -> -- ^ K
+                   -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                   M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                   Ident ->  -- ^ label for the current block
+                   [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
+                   [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_stmts fname k lb_map ident stmts = map (\stmt -> cps_trans_stmt fname k lb_map ident stmt) stmts
+
+
+-- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
+cps_trans_stmt :: Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> AST.CCompoundBlockItem N.NodeInfo
+{-
+l_i : { \bar{i} ; s } \in \bar{b}   l |- \bar{i} => x1 = e1; ...; xn =en; 
+----------------------------------------------------------------------------- (GT1)
+fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
+-}
+cps_trans_stmt fname k lb_map ident (AST.CBlockStmt (AST.CGoto l_i nodeInfo)) = undefined
+
+cps_trans_stmt fname k lb_map ident stmt = undefined
      
 
 

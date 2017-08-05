@@ -431,7 +431,9 @@ renameLabel0 decl =
     { (decl', rstate') -> decl' }
       
 
-
+-- ^ insert goto statement according to the succ 
+-- ^ 1. skipping if statement
+-- ^ 2. insert only the last statement is not goto
 insertGotos :: CFG -> CFG
 insertGotos cfg = undefined
 
