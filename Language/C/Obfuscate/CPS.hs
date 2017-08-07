@@ -219,20 +219,49 @@ cps_trans_stmts :: Ident -> -- ^ fname
                    Ident ->  -- ^ label for the current block
                    [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
                    [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_stmts fname k lb_map ident stmts = map (\stmt -> cps_trans_stmt fname k lb_map ident stmt) stmts
+cps_trans_stmts fname k lb_map ident stmts = concatMap (\stmt -> cps_trans_stmt fname k lb_map ident stmt) stmts
 
 
 -- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
-cps_trans_stmt :: Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> AST.CCompoundBlockItem N.NodeInfo
+cps_trans_stmt :: Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
 {-
 l_i : { \bar{i} ; s } \in \bar{b}   l |- \bar{i} => x1 = e1; ...; xn =en; 
 ----------------------------------------------------------------------------- (GT1)
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
-cps_trans_stmt fname k lb_map ident (AST.CBlockStmt (AST.CGoto l_i nodeInfo)) = undefined
+cps_trans_stmt fname k lb_map ident (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
+  { Just lb | null (phis lb) -> let as = cps_trans_phis ident (phis lb)
+                                    fname' = fname `app` li
+                                    funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) [(AST.CVar k N.undefNode)] N.undefNode)) N.undefNode)
+                                in as ++ [ funcall ]
+{-
+l_i : { s } \in \bar{b}    
+----------------------------------------------------------------------------- (GT2)
+fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
+-}                                   
+            | otherwise      -> let fname' = fname `app` li
+                                    funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) [(AST.CVar k N.undefNode)] N.undefNode)) N.undefNode)
+                                in [ funcall ]
+  ; Nothing -> error "cps_trans_stmt failed at a non existent label."
+  }
 
 cps_trans_stmt fname k lb_map ident stmt = undefined
      
+
+
+cps_trans_phis ::  Ident -- ^ caller's label
+                   -> [( Ident -- ^ var being redefined 
+                       , [(Ident, Ident)])] -- ^ incoming block x renamed variables
+                   ->  [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_phis caller_lb ps = map (cps_trans_phi caller_lb) ps
+
+
+cps_trans_phi :: Ident -> (Ident, [(Ident, Ident)]) -> AST.CCompoundBlockItem N.NodeInfo
+cps_trans_phi caller_lb (var, pairs) = 
+  case lookup caller_lb pairs of 
+    { Nothing -> error "cps_trans_phi failed: can't find the caller label from the incoming block."
+    ; Just renamedVar -> AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp (AST.CVar var N.undefNode) (AST.CVar renamedVar N.undefNode) N.undefNode)) N.undefNode) -- todo check var has been renamed with context
+    }
 
 
 {-
