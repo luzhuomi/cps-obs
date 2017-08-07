@@ -151,7 +151,7 @@ data CDeclarationSpecifier a
   
   
 {-  
----------
+--------- (Var)
 x => X
 -}
 
@@ -161,26 +161,32 @@ instance CPSize (AST.CDeclarator N.NodeInfo) (AST.CDeclarator N.NodeInfo) where
 -}
 
 
-{- fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
-translating the labeled blocks to function decls
+-- fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
+--translating the labeled blocks to function decls
 
-
+{-
 fn, K, \bar{\Delta}, \bar{b}  |- b_i => P_i
------------------------------------
+--------------------------------------------- 
 fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
 -}
 
-cps_trans_lbs :: Ident ->  -- ^ top level function name
+type ContextName = String 
+
+
+cps_trans_lbs :: ContextName -> 
+                 Ident ->  -- ^ top level function name
                  Ident -> -- ^ K, the continuation
                  -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                  M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                  [AST.CFunctionDef N.NodeInfo] 
-cps_trans_lbs fname k lb_map = map (\(id,lb) -> cps_trans_lb fname k lb_map id lb) (M.toList lb_map)
+cps_trans_lbs ctxtName fname k lb_map = 
+  map (\(id,lb) -> cps_trans_lb ctxtName fname k lb_map id lb) (M.toList lb_map)
 
 {- fn, K, \bar{\Delta}, \bar{b}  |- b => P -}
 
 
-cps_trans_lb :: Ident ->  -- ^ top level function name
+cps_trans_lb :: ContextName -> 
+                Ident ->  -- ^ top level function name
                 Ident -> -- ^ K
                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                 M.Map Ident LabeledBlock ->  -- ^ \bar{b}
@@ -189,6 +195,7 @@ cps_trans_lb :: Ident ->  -- ^ top level function name
                 AST.CFunctionDef N.NodeInfo
 
 {-
+
 fn, K, \bar{\Delta}, \bar{b} |- s => S
 ----------------------------------------------------------------- (LabBlk)
 fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i() { S } 
@@ -200,8 +207,8 @@ fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i() { S }
 -}
 
 
-cps_trans_lb  fname k lb_map ident lb = 
-  let stmt' =  AST.CCompound [] (cps_trans_stmts fname k lb_map ident (lb_stmts lb)) N.undefNode
+cps_trans_lb ctxtName fname k lb_map ident lb = 
+  let stmt' =  AST.CCompound [] (cps_trans_stmts ctxtName fname k lb_map ident (lb_stmts lb)) N.undefNode
       fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
@@ -212,55 +219,77 @@ cps_trans_lb  fname k lb_map ident lb =
     
      
      
-cps_trans_stmts :: Ident -> -- ^ fname 
+cps_trans_stmts :: ContextName -> 
+                   Ident -> -- ^ fname 
                    Ident -> -- ^ K
                    -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                    M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                    Ident ->  -- ^ label for the current block
                    [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
                    [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_stmts fname k lb_map ident stmts = concatMap (\stmt -> cps_trans_stmt fname k lb_map ident stmt) stmts
+cps_trans_stmts ctxtName fname k lb_map ident stmts = concatMap (\stmt -> cps_trans_stmt ctxtName fname k lb_map ident stmt) stmts
 
 
 -- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
-cps_trans_stmt :: Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_stmt :: ContextName -> Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
 {-
 l_i : { \bar{i} ; s } \in \bar{b}   l |- \bar{i} => x1 = e1; ...; xn =en; 
 ----------------------------------------------------------------------------- (GT1)
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
-cps_trans_stmt fname k lb_map ident (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
-  { Just lb | null (phis lb) -> let as = cps_trans_phis ident (phis lb)
-                                    fname' = fname `app` li
-                                    funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) [(AST.CVar k N.undefNode)] N.undefNode)) N.undefNode)
-                                in as ++ [ funcall ]
+-- note that our target is C, hence besides k, the function call include argument such as context
+cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
+  { Just lb | null (phis lb) -> 
+       let asgmts  = cps_trans_phis ctxtName ident (phis lb)
+           fname'  = fname `app` li
+           args    = [ AST.CVar k N.undefNode
+                     , AST.CVar (internalIdent ctxtName) N.undefNode ] 
+           funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
+       in asgmts ++ [ funcall ]
 {-
 l_i : { s } \in \bar{b}    
 ----------------------------------------------------------------------------- (GT2)
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
 -}                                   
-            | otherwise      -> let fname' = fname `app` li
-                                    funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) [(AST.CVar k N.undefNode)] N.undefNode)) N.undefNode)
-                                in [ funcall ]
+            | otherwise      -> 
+         let fname'  = fname `app` li
+             args    = [ AST.CVar k N.undefNode
+                     , AST.CVar (internalIdent ctxtName) N.undefNode ] 
+             funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
+         in [ funcall ]
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
   }
 
-cps_trans_stmt fname k lb_map ident stmt = undefined
+cps_trans_stmt ctxtName fname k lb_map ident stmt = undefined
      
 
 
-cps_trans_phis ::  Ident -- ^ caller's label
-                   -> [( Ident -- ^ var being redefined 
-                       , [(Ident, Ident)])] -- ^ incoming block x renamed variables
-                   ->  [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_phis caller_lb ps = map (cps_trans_phi caller_lb) ps
+cps_trans_phis ::  ContextName ->
+                   Ident -> -- ^ caller's label
+                   [( Ident -- ^ var being redefined 
+                    , [(Ident, Ident)])] ->  -- ^ incoming block x renamed variables
+                   [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_phis ctxtName caller_lb ps = map (cps_trans_phi ctxtName caller_lb) ps
 
 
-cps_trans_phi :: Ident -> (Ident, [(Ident, Ident)]) -> AST.CCompoundBlockItem N.NodeInfo
-cps_trans_phi caller_lb (var, pairs) = 
+(.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
+(.->.) struct member = AST.CMember struct member True N.undefNode
+
+(...) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
+(...) struct member = AST.CMember struct member False N.undefNode
+
+
+cps_trans_phi :: ContextName -> 
+                 Ident -> 
+                 (Ident, [(Ident, Ident)]) -> 
+                 AST.CCompoundBlockItem N.NodeInfo
+cps_trans_phi ctxtName caller_lb (var, pairs) = 
   case lookup caller_lb pairs of 
     { Nothing -> error "cps_trans_phi failed: can't find the caller label from the incoming block."
-    ; Just renamedVar -> AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp (AST.CVar var N.undefNode) (AST.CVar renamedVar N.undefNode) N.undefNode)) N.undefNode) -- todo check var has been renamed with context
+    ; Just renamedVar -> 
+      let lhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. var
+          rhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. renamedVar
+      in AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp lhs rhs N.undefNode)) N.undefNode) -- todo check var has been renamed with label
     }
 
 
@@ -270,7 +299,7 @@ top level translation   p => P
 t => T    x => X     ti => Ti     xi => Xi     di => Di
 \bar{b} |- \bar{\Delta}    id, \bar{\Delta} |- \bar{b} => \bar{P}
 P1 = void f1 (void => void k) { B1 } 
--------------------------------------------------------------------------
+------------------------------------------------------------------------
 |- t x (\bar{t x}) {\bar{d};\bar{b}}  => 
          T X (\bar{T X}) {\bar{D}; T rx; \bar{P}; f1(id); return rx; }
 -}
@@ -278,10 +307,14 @@ P1 = void f1 (void => void k) { B1 }
 -- 1. the top function's type signature is not captured within SSA
 -- 2. \Delta is captured as the loop flag in LabaledBlock
 -- 3. there is no lambda expression, closure needs to be created as a context
+--     aux function that has type (void => void) => void should be in fact 
+--    (void => void, ctxt*) => void
+-- 4. \bar{D} should be the context malloc and initialization
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
 ssa2cps fundef (SSA scopedDecls labelledBlocks) = 
   let funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
-      context = mkContext (funName ++ "Ctxt") scopedDecls
+      ctxtName = funName ++ "Ctxt"
+      context = mkContext ctxtName scopedDecls
       
   in undefined
 
