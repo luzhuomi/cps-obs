@@ -198,11 +198,11 @@ cps_trans_lb :: ContextName ->
 
 fn, K, \bar{\Delta}, \bar{b} |- s => S
 ----------------------------------------------------------------- (LabBlk)
-fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i() { S } 
+fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i(void => void k) { S } 
 
 fn, K, \bar{\Delta}, \bar{b} |- s => S
 --------------------------------------------------------------------------- (PhiBlk)
-fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i() { S }
+fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k) { S }
 
 -}
 
@@ -212,7 +212,17 @@ cps_trans_lb ctxtName fname k lb_map ident lb =
       fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
-      decltrs = []
+      paramK = AST.CDecl tyVoid -- void (*k)(ctxt *)
+               [(Just (AST.CDeclr (Just (internalIdent "k")) 
+                       [ AST.CPtrDeclr [] N.undefNode
+                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode) ] 
+                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                N.undefNode], False)
+                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)]  -- ctxt* ctxt
+                  [(Just (AST.CDeclr (Just (internalIdent "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+      paramDeclr = [paramK, paramCtxt]
+      decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
       mb_strLitr = Nothing
       attrs  =  []
   in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
@@ -233,14 +243,14 @@ cps_trans_stmts ctxtName fname k lb_map ident stmts = concatMap (\stmt -> cps_tr
 -- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 cps_trans_stmt :: ContextName -> Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
 {-
-l_i : { \bar{i} ; s } \in \bar{b}   l |- \bar{i} => x1 = e1; ...; xn =en; 
+l_i : { \bar{i} ; s } \in \bar{b}   l, l_i |- \bar{i} => x1 = e1; ...; xn =en; 
 ----------------------------------------------------------------------------- (GT1)
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
 cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
   { Just lb | null (phis lb) -> 
-       let asgmts  = cps_trans_phis ctxtName ident (phis lb)
+       let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
            args    = [ AST.CVar k N.undefNode
                      , AST.CVar (internalIdent ctxtName) N.undefNode ] 
@@ -265,11 +275,12 @@ cps_trans_stmt ctxtName fname k lb_map ident stmt = undefined
 
 
 cps_trans_phis ::  ContextName ->
-                   Ident -> -- ^ caller's label
+                   Ident -> -- ^ source block label (where goto is invoked)
+                   Ident -> -- ^ destination block label (where goto is jumping to)
                    [( Ident -- ^ var being redefined 
                     , [(Ident, Ident)])] ->  -- ^ incoming block x renamed variables
                    [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_phis ctxtName caller_lb ps = map (cps_trans_phi ctxtName caller_lb) ps
+cps_trans_phis ctxtName src_lb dest_lb ps = map (cps_trans_phi ctxtName src_lb dest_lb) ps
 
 
 (.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
@@ -279,16 +290,23 @@ cps_trans_phis ctxtName caller_lb ps = map (cps_trans_phi ctxtName caller_lb) ps
 (...) struct member = AST.CMember struct member False N.undefNode
 
 
+
+{-
+---------------------------------------
+l_s, l_d |- \bar{i} => \bar{x = e}
+-}
+
 cps_trans_phi :: ContextName -> 
-                 Ident -> 
+                 Ident -> -- ^ source block label (where goto is invoked)
+                 Ident -> -- ^ destination block label (where goto is jumping to)
                  (Ident, [(Ident, Ident)]) -> 
                  AST.CCompoundBlockItem N.NodeInfo
-cps_trans_phi ctxtName caller_lb (var, pairs) = 
-  case lookup caller_lb pairs of 
-    { Nothing -> error "cps_trans_phi failed: can't find the caller label from the incoming block."
-    ; Just renamedVar -> 
-      let lhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. var
-          rhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. renamedVar
+cps_trans_phi ctxtName src_lb dest_lb (var, pairs) = 
+  case lookup src_lb pairs of -- look for the matching label according to the source label
+    { Nothing           -> error "cps_trans_phi failed: can't find the source label from the incoming block labels."
+    ; Just redefined_lb -> -- lbl in which the var is redefined (it could be the precedence of src_lb)
+      let lhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` dest_lb)
+          rhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` redefined_lb)
       in AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp lhs rhs N.undefNode)) N.undefNode) -- todo check var has been renamed with label
     }
 
