@@ -269,6 +269,21 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
          in [ funcall ]
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
   }
+                                                                                        
+{-                                                                                        
+e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
+----------------------------------------------------------------------------- (SeqE)
+fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
+-}
+cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
+  let e' = cps_trans_exp e
+  in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+
+{-
+e => E
+----------------------------------------------------------------------------- (return)
+fn, K, \bar{\Delta}, \bar{b} |-_l return e => x_r = E; K()
+-}
 
 cps_trans_stmt ctxtName fname k lb_map ident stmt = undefined
      
@@ -310,6 +325,20 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
       in AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp lhs rhs N.undefNode)) N.undefNode) -- todo check var has been renamed with label
     }
 
+
+
+-- e => E
+{-
+--------- (ExpVal)
+ v => V
+
+ e => E,      e_i => E_i
+-------------------------- (ExpApp)
+ e(\bar{e}) => E(\bar{E})
+-}
+-- it seems just to be identical 
+cps_trans_exp :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+cps_trans_exp e = e
 
 {-
 top level translation   p => P
