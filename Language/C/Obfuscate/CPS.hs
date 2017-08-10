@@ -71,8 +71,11 @@ data CPS = CPS { cps_decls :: [AST.CDeclaration N.NodeInfo]  -- ^ main function 
                , cps_ctxt  :: AST.CDeclaration N.NodeInfo -- ^ the context for the closure
                } deriving Show
                           
-                          
-                          
+-- global names                          
+kParamName = "kParam"
+ctxtParamName = "ctxtParam"                          
+
+
 {-
 class CPSize ssa cps where
   cps_trans :: ssa -> cps 
@@ -213,14 +216,14 @@ cps_trans_lb ctxtName fname k lb_map ident lb =
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
       paramK = AST.CDecl tyVoid -- void (*k)(ctxt *)
-               [(Just (AST.CDeclr (Just (internalIdent "k")) 
+               [(Just (AST.CDeclr (Just (internalIdent kParamName)) 
                        [ AST.CPtrDeclr [] N.undefNode
                        , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode) ] 
                                                 [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
                                                 N.undefNode], False)
                                        ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
       paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)]  -- ctxt* ctxt
-                  [(Just (AST.CDeclr (Just (internalIdent "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+                  [(Just (AST.CDeclr (Just (internalIdent ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
       paramDeclr = [paramK, paramCtxt]
       decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
       mb_strLitr = Nothing
@@ -280,10 +283,34 @@ cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CExpr (Just e)
   in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
 
 {-
-e => E
------------------------------------------------------------------------------ (return)
-fn, K, \bar{\Delta}, \bar{b} |-_l return e => x_r = E; K()
+----------------------------------------------------------------------------- (returnNil)
+fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -}
+
+cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
+  in [ funcall ]
+
+{-
+e => E
+----------------------------------------------------------------------------- (returnE)
+fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
+-}
+cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
+      e' = cps_trans_exp e
+  in [ AST.CBlockStmt (AST.CExpr (Just e') nodeInfo), funcall ]
+  
+{-
+l \not \in \Delta
+e => E
+fn, K, \bar{\Delta}, \bar{b} |-_l s1 => S1
+fn, K, \bar{\Delta}, \bar{b} |-_l s2 => S2
+--------------------------------------------------------------------------------------------- (IfNotLoop)
+fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } else { S2 } ; 
+-}
+  
+
 
 cps_trans_stmt ctxtName fname k lb_map ident stmt = undefined
      
