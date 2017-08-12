@@ -299,9 +299,11 @@ fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
 ----------------------------------------------------------------------------- (returnNil)
 fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -}
-
+-- C does not support higher order function.
+-- K belongs to the contxt
+-- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent kParamName)) N.undefNode ) [] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
@@ -309,10 +311,14 @@ e => E
 ----------------------------------------------------------------------------- (returnE)
 fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -}
+-- C does not support higher order function.
+-- x_r and K belong to the contxt
+-- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent kParamName)) N.undefNode ) [] N.undefNode)) N.undefNode)
       e' = cps_trans_exp e
-  in [ AST.CBlockStmt (AST.CExpr (Just e') nodeInfo), funcall ]
+      assign = AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) e' N.undefNode
+  in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
      
 
@@ -325,10 +331,21 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
 -}    
   | inDelta = 
     let exp' = cps_trans_exp exp
-        fname' = "cps_loop"
-        args   = [ exp', -- todo put lambda
-                   
-        funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.defNode)) N.undefNode)
+        lbl_tr = case trueStmt of 
+          { AST.CGoto lbl _ -> lbl 
+          ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
+          }
+        lbl_fl = case mbFalseStmt of 
+          { Just (AST.CGoto lbl _) -> lbl 
+          ; _ -> error "cps_trans_stmt error: the false statement in a looping if statement does not contain goto"
+          }
+        fname' = internalIdent "cps_loop"
+        args   = [ exp' -- todo put lambda
+                 , AST.CUnary AST.CAdrOp (AST.CVar (fname `app` lbl_tr) N.undefNode) N.undefNode
+                 , AST.CUnary AST.CAdrOp (AST.CVar (fname `app` lbl_fl) N.undefNode) N.undefNode
+                 , (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
+                 ]
+        funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
     in [ funcall ]
 {-
 l \not \in \Delta
