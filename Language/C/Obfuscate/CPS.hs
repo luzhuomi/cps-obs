@@ -257,7 +257,7 @@ cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CGoto 
   { Just lb | null (phis lb) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
-           args    = [ AST.CVar k N.undefNode
+           args    = [ (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
                      , AST.CVar (internalIdent ctxtName) N.undefNode ] 
            funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
        in asgmts ++ [ funcall ]
@@ -268,8 +268,8 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
 -}                                   
             | otherwise      -> 
          let fname'  = fname `app` li
-             args    = [ AST.CVar k N.undefNode
-                     , AST.CVar (internalIdent ctxtName) N.undefNode ] 
+             args    = [ (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
+                       , AST.CVar (internalIdent ctxtName) N.undefNode ] 
              funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
          in [ funcall ]
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
@@ -303,7 +303,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -- K belongs to the contxt
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent kParamName)) N.undefNode ) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. k) N.undefNode ) [] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
@@ -315,7 +315,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -- x_r and K belong to the contxt
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent kParamName)) N.undefNode ) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. k) N.undefNode ) [] N.undefNode)) N.undefNode)
       e' = cps_trans_exp e
       assign = AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) e' N.undefNode
   in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
