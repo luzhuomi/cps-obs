@@ -293,7 +293,7 @@ data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined
                        , lb_stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , lb_preds :: [NodeId]
                        , lb_succs :: [NodeId]
-                       , loop  :: Bool
+                       , lb_loop  :: Bool
                        }
                     deriving Show
                              

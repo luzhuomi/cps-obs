@@ -211,7 +211,7 @@ fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k)
 
 
 cps_trans_lb ctxtName fname k lb_map ident lb = 
-  let stmt' =  AST.CCompound [] (cps_trans_stmts ctxtName fname k lb_map ident (lb_stmts lb)) N.undefNode
+  let stmt' =  AST.CCompound [] (cps_trans_stmts ctxtName fname k lb_map ident (lb_loop lb) (lb_stmts lb)) N.undefNode
       fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
@@ -238,20 +238,22 @@ cps_trans_stmts :: ContextName ->
                    -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                    M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                    Ident ->  -- ^ label for the current block
+                   Bool  ->  -- ^ whether label \in \Delta (is it a loop block)
                    [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
                    [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_stmts ctxtName fname k lb_map ident stmts = concatMap (\stmt -> cps_trans_stmt ctxtName fname k lb_map ident stmt) stmts
+cps_trans_stmts ctxtName fname k lb_map ident inDelta stmts = concatMap (\stmt -> cps_trans_stmt ctxtName fname k lb_map ident inDelta stmt) stmts -- todo: maybe pattern match the CCompound constructor here?
+
 
 
 -- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
-cps_trans_stmt :: ContextName -> Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
+cps_trans_stmt :: ContextName -> Ident -> Ident ->  M.Map Ident LabeledBlock -> Ident -> Bool -> AST.CCompoundBlockItem N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo]
 {-
 l_i : { \bar{i} ; s } \in \bar{b}   l, l_i |- \bar{i} => x1 = e1; ...; xn =en; 
 ----------------------------------------------------------------------------- (GT1)
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
-cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
+cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
   { Just lb | null (phis lb) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
@@ -273,21 +275,32 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
   }
                                                                                         
+
+cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
+  case e of 
+   { AST.CAssign op lval rval ni -> 
+{-                                                                                        
+x => X; e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
+----------------------------------------------------------------------------- (SeqAssign)
+fn, K, \bar{\Delta}, \bar{b} |-_l x = e;s => X = E;S
+-}             
+     let e' = cps_trans_exp e
+     in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+   ; _ -> 
 {-                                                                                        
 e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 ----------------------------------------------------------------------------- (SeqE)
 fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
--}
-cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
-  let e' = cps_trans_exp e
-  in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
-
+-}     
+     let e' = cps_trans_exp e
+     in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+   }
 {-
 ----------------------------------------------------------------------------- (returnNil)
 fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -}
 
-cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
+cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
   let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
   in [ funcall ]
 
@@ -296,11 +309,27 @@ e => E
 ----------------------------------------------------------------------------- (returnE)
 fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -}
-cps_trans_stmt ctxtName fname k lb_map ident (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
+cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
   let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar (internalIdent kParamName) N.undefNode) [] N.undefNode)) N.undefNode)
       e' = cps_trans_exp e
   in [ AST.CBlockStmt (AST.CExpr (Just e') nodeInfo), funcall ]
   
+     
+
+cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo)) 
+{-
+l \in \Delta
+e => E
+------------------------------------------------------------------------------------------------------- (IfLoop)
+fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(() => E, f_l1 ,f_l2, k) ; 
+-}    
+  | inDelta = 
+    let exp' = cps_trans_exp exp
+        fname' = "cps_loop"
+        args   = [ exp', -- todo put lambda
+                   
+        funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.defNode)) N.undefNode)
+    in [ funcall ]
 {-
 l \not \in \Delta
 e => E
@@ -308,11 +337,28 @@ fn, K, \bar{\Delta}, \bar{b} |-_l s1 => S1
 fn, K, \bar{\Delta}, \bar{b} |-_l s2 => S2
 --------------------------------------------------------------------------------------------- (IfNotLoop)
 fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } else { S2 } ; 
--}
-  
+-}  
+  | otherwise = 
+    let trueStmt'    = case trueStmt of 
+          { AST.CCompound ids items ni -> AST.CCompound ids (cps_trans_stmts ctxtName fname k lb_map ident inDelta items) ni 
+          ; _ -> case cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt trueStmt) of 
+            { [ AST.CBlockStmt trueStmt'' ] -> trueStmt''
+            ; items -> AST.CCompound [] items N.undefNode
+            }
+          }
+        mbFalseStmt' = case mbFalseStmt of 
+          { Nothing        -> Nothing 
+          ; Just (AST.CCompound ids items ni) -> Just $ AST.CCompound ids (cps_trans_stmts ctxtName fname k lb_map ident inDelta items) ni   
+          ; Just falseStmt -> Just $ case cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt falseStmt) of 
+            { [  AST.CBlockStmt falseStmt'' ] -> falseStmt'' 
+            ; items -> AST.CCompound [] items N.undefNode
+            }
+          }
+        exp' = cps_trans_exp exp
+    in [AST.CBlockStmt (AST.CIf exp' trueStmt' mbFalseStmt' nodeInfo)]
 
 
-cps_trans_stmt ctxtName fname k lb_map ident stmt = undefined
+cps_trans_stmt ctxtName fname k lb_map ident inDelta stmt = undefined
      
 
 
