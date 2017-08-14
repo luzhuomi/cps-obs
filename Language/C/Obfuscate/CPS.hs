@@ -65,7 +65,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 -}
 
 -- ^ a CPS function declaration AST
-data CPS = CPS { cps_decls :: [AST.CDeclaration N.NodeInfo]  -- ^ main function decls
+data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function decls
                , cps_stmts :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function stmts
                , cps_funcs :: [AST.CFunctionDef N.NodeInfo] -- ^ generated auxillary functions
                , cps_ctxt  :: AST.CDeclaration N.NodeInfo -- ^ the context for the closure
@@ -328,7 +328,8 @@ l \in \Delta
 e => E
 ------------------------------------------------------------------------------------------------------- (IfLoop)
 fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(() => E, f_l1 ,f_l2, k) ; 
--}    
+-}  
+-- in C, f_l1 and f_l2 need to be passed in as address &
   | inDelta = 
     let exp' = cps_trans_exp exp
         lbl_tr = case trueStmt of 
@@ -450,10 +451,33 @@ P1 = void f1 (void => void k) { B1 }
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
 ssa2cps fundef (SSA scopedDecls labelledBlocks) = 
   let funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
+      formalArgs = getFormalArgs fundef
       ctxtName = funName ++ "Ctxt"
+      -- the context struct declaration
       context = mkContext ctxtName scopedDecls
+      -- all the "nested" function declarations
+      ps = cps_trans_lbs ctxtName (internalIdent funName) (internalIdent "id") labelledBlocks
+      main_decls = 
+        -- 1. malloc the context
+        -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
+        [ AST.CBlockDecl (AST.CDecl 
+                          [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] 
+                          [(Just (AST.CDeclr (Just (internalIdent "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),
+                            Just (AST.CInitExpr 
+                                  (AST.CCast (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] 
+                                              [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode) 
+                                   (AST.CCall (AST.CVar (internalIdent "malloc") N.undefNode) 
+                                    [AST.CSizeofType (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] [] N.undefNode) N.undefNode] N.undefNode) N.undefNode) N.undefNode),Nothing)] N.undefNode)
+        ] 
+      -- formalArgs = undefined
+      main_stmts = 
+        -- 2. initialize the counter-part  in the context of the formal args
+        -- forall arg. ctxt->arg 
+        [ AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) (AST.CVar arg N.undefNode) N.undefNode)) N.undefNode) | 
+          arg <- formalArgs
+        ] 
       
-  in undefined
+  in CPS main_decls main_stmts ps context 
 
 getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
 getFunName (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getDeclrName declarator
@@ -462,9 +486,22 @@ getDeclrName :: (AST.CDeclarator N.NodeInfo) -> Maybe String
 getDeclrName (AST.CDeclr Nothing decltrs mb_strLtr attrs nodeInfo) = Nothing
 getDeclrName (AST.CDeclr (Just (Ident str _ _)) decltrs mb_strLtr attrs nodeInfo)  = Just str
 
+getFormalArgs :: (AST.CFunctionDef N.NodeInfo) -> [Ident]
+getFormalArgs (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getFormalArgsFromDeclarator declarator
+
+getFormalArgsFromDeclarator :: (AST.CDeclarator N.NodeInfo) -> [Ident]
+getFormalArgsFromDeclarator (AST.CDeclr mb_ident derivedDecltrs mb_ctrlit attrs nodeInfo) = concatMap getFormalArgsFromDerivedDeclarator derivedDecltrs
+
+getFormalArgsFromDerivedDeclarator :: (AST.CDerivedDeclarator N.NodeInfo) -> [Ident]
+getFormalArgsFromDerivedDeclarator (AST.CFunDeclr either_old_new attrs nodeInfo) =  -- either_old_new :: Either [Ident] ([CDeclaration a],Bool)
+  case either_old_new of 
+   { Left idents -> idents -- todo: the old style
+   ; Right (declarations, flag) -> undefined 
+   }
+
 
 mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext name decls = 
+mkContext name decls = -- todo the loop higher function stack
   let structName  = internalIdent name
       ctxtAlias = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs     = []
