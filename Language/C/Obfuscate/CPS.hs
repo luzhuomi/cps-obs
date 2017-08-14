@@ -19,6 +19,29 @@ import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
+
+
+testCPS = do 
+  { let opts = []
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts {- "test/sort.c" -- -} "test/fibiter.c"
+  ; case ast of 
+    { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
+         case runCFG fundef of
+           { CFGOk (_, state) -> do 
+                { -- putStrLn $ show $ buildDTree (cfg state)
+                ; -- putStrLn $ show $ buildDF (cfg state)
+                ; let cps = ssa2cps fundef (buildSSA (cfg state))
+                ; -- putStrLn $ show $ cps
+                ; putStrLn $ render $ pretty (cps_ctxt cps)
+                ; mapM_  (\f -> putStrLn $ render $ pretty f) (cps_funcs cps)
+                }
+           ; CFGError s       -> error s
+           }
+    ; _ -> error "not fundec"
+    }
+  }
+
+
 {- Source Language SSA
 
 (Prog)  p ::= t x (\bar{t x}) {\bar{d}; \bar{b} }
@@ -448,13 +471,17 @@ P1 = void f1 (void => void k) { B1 }
 --     aux function that has type (void => void) => void should be in fact 
 --    (void => void, ctxt*) => void
 -- 4. \bar{D} should be the context malloc and initialization
+-- 5. all the formal args should be copied to context
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
 ssa2cps fundef (SSA scopedDecls labelledBlocks) = 
   let funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
-      formalArgs = getFormalArgs fundef
+      formalArgDecls :: [AST.CDeclaration N.NodeInfo]
+      formalArgDecls = getFormalArgs fundef
+      formalArgIds :: [Ident]
+      formalArgIds = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
       ctxtName = funName ++ "Ctxt"
       -- the context struct declaration
-      context = mkContext ctxtName scopedDecls
+      context = mkContext ctxtName formalArgDecls scopedDecls 
       -- all the "nested" function declarations
       ps = cps_trans_lbs ctxtName (internalIdent funName) (internalIdent "id") labelledBlocks
       main_decls = 
@@ -474,7 +501,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
         [ AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) (AST.CVar arg N.undefNode) N.undefNode)) N.undefNode) | 
-          arg <- formalArgs
+          arg <- formalArgIds
         ] 
       
   in CPS main_decls main_stmts ps context 
@@ -486,26 +513,34 @@ getDeclrName :: (AST.CDeclarator N.NodeInfo) -> Maybe String
 getDeclrName (AST.CDeclr Nothing decltrs mb_strLtr attrs nodeInfo) = Nothing
 getDeclrName (AST.CDeclr (Just (Ident str _ _)) decltrs mb_strLtr attrs nodeInfo)  = Just str
 
-getFormalArgs :: (AST.CFunctionDef N.NodeInfo) -> [Ident]
+getFormalArgs :: (AST.CFunctionDef N.NodeInfo) -> [AST.CDeclaration N.NodeInfo]
 getFormalArgs (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getFormalArgsFromDeclarator declarator
 
-getFormalArgsFromDeclarator :: (AST.CDeclarator N.NodeInfo) -> [Ident]
+getFormalArgsFromDeclarator :: (AST.CDeclarator N.NodeInfo) -> [AST.CDeclaration N.NodeInfo]
 getFormalArgsFromDeclarator (AST.CDeclr mb_ident derivedDecltrs mb_ctrlit attrs nodeInfo) = concatMap getFormalArgsFromDerivedDeclarator derivedDecltrs
 
-getFormalArgsFromDerivedDeclarator :: (AST.CDerivedDeclarator N.NodeInfo) -> [Ident]
+getFormalArgsFromDerivedDeclarator :: (AST.CDerivedDeclarator N.NodeInfo) -> [AST.CDeclaration N.NodeInfo]
 getFormalArgsFromDerivedDeclarator (AST.CFunDeclr either_old_new attrs nodeInfo) =  -- either_old_new :: Either [Ident] ([CDeclaration a],Bool)
   case either_old_new of 
-   { Left idents -> idents -- todo: the old style
-   ; Right (declarations, flag) -> undefined 
+   { Left idents -> [] -- todo: check what the old style is like?
+   ; Right (declarations, flag) -> declarations --  concatMap getFormalArg declarations
    }
 
 
-mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext name decls = -- todo the loop higher function stack
+
+getFormalArgIds :: (AST.CDeclaration N.NodeInfo) -> [Ident]
+getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_init, mb_exp) -> case mb_decltr of 
+                                                                   { Nothing -> [] 
+                                                                   ; Just (AST.CDeclr (Just id) derived mb_clit attrs _) -> [id]
+                                                                   ; Just _ -> []
+                                                                   }) trips
+
+mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
+mkContext name formal_arg_decls local_var_decls = -- todo the loop higher function stack
   let structName  = internalIdent name
       ctxtAlias = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs     = []
-      decls'    = decls
+      decls'    = formal_arg_decls ++ local_var_decls
       tyDef     = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef =
         AST.CTypeSpec (AST.CSUType
