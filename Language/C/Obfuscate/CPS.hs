@@ -201,19 +201,17 @@ type ContextName = String
 
 cps_trans_lbs :: ContextName -> 
                  Ident ->  -- ^ top level function name
-                 Ident -> -- ^ K, the continuation
                  -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                  M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                  [AST.CFunctionDef N.NodeInfo] 
-cps_trans_lbs ctxtName fname k lb_map = 
-  map (\(id,lb) -> cps_trans_lb ctxtName fname k lb_map id lb) (M.toList lb_map)
+cps_trans_lbs ctxtName fname lb_map = 
+  map (\(id,lb) -> cps_trans_lb ctxtName fname lb_map id lb) (M.toList lb_map)
 
-{- fn, K, \bar{\Delta}, \bar{b}  |- b => P -}
+{- fn, \bar{\Delta}, \bar{b}  |- b => P -}
 
 
 cps_trans_lb :: ContextName -> 
                 Ident ->  -- ^ top level function name
-                Ident -> -- ^ K
                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
                 M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                 Ident ->  -- ^ label for the current block
@@ -222,24 +220,24 @@ cps_trans_lb :: ContextName ->
 
 {-
 
-fn, K, \bar{\Delta}, \bar{b} |- s => S
+fn, k, \bar{\Delta}, \bar{b} |- s => S
 ----------------------------------------------------------------- (LabBlk)
-fn, K, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i(void => void k) { S } 
+fn, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i(void => void k) { S } 
 
-fn, K, \bar{\Delta}, \bar{b} |- s => S
+fn, k, \bar{\Delta}, \bar{b} |- s => S
 --------------------------------------------------------------------------- (PhiBlk)
-fn, K, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k) { S }
+fn, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k) { S }
 
 -}
 
 
-cps_trans_lb ctxtName fname k lb_map ident lb = 
-  let stmt' =  AST.CCompound [] (cps_trans_stmts ctxtName fname k lb_map ident (lb_loop lb) (lb_stmts lb)) N.undefNode
-      fname' = fname `app` ident
+cps_trans_lb ctxtName fname lb_map ident lb = 
+  let fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
+      k      = internalIdent kParamName
       paramK = AST.CDecl tyVoid -- void (*k)(ctxt *)
-               [(Just (AST.CDeclr (Just (internalIdent kParamName)) 
+               [(Just (AST.CDeclr (Just k) 
                        [ AST.CPtrDeclr [] N.undefNode
                        , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode) ] 
                                                 [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
@@ -251,6 +249,7 @@ cps_trans_lb ctxtName fname k lb_map ident lb =
       decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
       mb_strLitr = Nothing
       attrs  =  []
+      stmt' =  AST.CCompound [] (cps_trans_stmts ctxtName fname k lb_map ident (lb_loop lb) (lb_stmts lb)) N.undefNode      
   in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
     
      
@@ -323,10 +322,10 @@ fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
 fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -}
 -- C does not support higher order function.
--- K belongs to the contxt
+-- K is passed in as a formal arg
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. k) N.undefNode ) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (AST.CVar k N.undefNode) N.undefNode ) [] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
@@ -338,7 +337,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -- x_r and K belong to the contxt
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. k) N.undefNode ) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (AST.CVar k N.undefNode) N.undefNode ) [] N.undefNode)) N.undefNode)
       e' = cps_trans_exp e
       assign = AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) e' N.undefNode
   in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
@@ -458,7 +457,7 @@ cps_trans_exp e = e
 top level translation   p => P
 
 t => T    x => X     ti => Ti     xi => Xi     di => Di
-\bar{b} |- \bar{\Delta}    id, \bar{\Delta} |- \bar{b} => \bar{P}
+\bar{b} |- \bar{\Delta}    k, \bar{\Delta} |- \bar{b} => \bar{P}
 P1 = void f1 (void => void k) { B1 } 
 ------------------------------------------------------------------------
 |- t x (\bar{t x}) {\bar{d};\bar{b}}  => 
@@ -483,7 +482,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
       -- the context struct declaration
       context = mkContext ctxtName formalArgDecls scopedDecls 
       -- all the "nested" function declarations
-      ps = cps_trans_lbs ctxtName (internalIdent funName) (internalIdent "id") labelledBlocks
+      ps = cps_trans_lbs ctxtName (internalIdent funName) {- (internalIdent "id") -} labelledBlocks
       main_decls = 
         -- 1. malloc the context
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
