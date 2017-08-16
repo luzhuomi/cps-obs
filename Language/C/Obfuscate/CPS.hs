@@ -277,7 +277,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
-  { Just lb | null (phis lb) -> 
+  { Just lb | not (null (phis lb)) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
            args    = [ (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
@@ -340,7 +340,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
   let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (AST.CVar k N.undefNode) N.undefNode ) [] N.undefNode)) N.undefNode)
       e' = cps_trans_exp e
-      assign = AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) e' N.undefNode
+      assign = ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) .=. e' 
   in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
      
@@ -436,7 +436,7 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
     ; Just redefined_lb -> -- lbl in which the var is redefined (it could be the precedence of src_lb)
       let lhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` dest_lb)
           rhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` redefined_lb)
-      in AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp lhs rhs N.undefNode)) N.undefNode) -- todo check var has been renamed with label
+      in AST.CBlockStmt (AST.CExpr (Just (lhs .=. rhs)) N.undefNode) -- todo check var has been renamed with label
     }
 
 
@@ -500,7 +500,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
-        [ AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) (AST.CVar arg N.undefNode) N.undefNode)) N.undefNode) | 
+        [ AST.CBlockStmt (AST.CExpr (Just (((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
           arg <- formalArgIds
         ] ++ [
           AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((internalIdent funName) `app` (internalIdent (labPref ++ "0" ))) N.undefNode) 
@@ -535,13 +535,17 @@ getFormalArgsFromDerivedDeclarator (AST.CFunDeclr either_old_new attrs nodeInfo)
    }
 
 
-
 getFormalArgIds :: (AST.CDeclaration N.NodeInfo) -> [Ident]
 getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_init, mb_exp) -> case mb_decltr of 
                                                                    { Nothing -> [] 
                                                                    ; Just (AST.CDeclr (Just id) derived mb_clit attrs _) -> [id]
                                                                    ; Just _ -> []
                                                                    }) trips
+
+
+
+(.=.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.=.) lhs rhs = AST.CAssign AST.CAssignOp lhs rhs N.undefNode
 
 mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
 mkContext name formal_arg_decls local_var_decls = -- todo the loop higher function stack

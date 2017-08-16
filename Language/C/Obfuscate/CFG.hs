@@ -149,8 +149,12 @@ class CProg a  where
   buildCFG :: a -> State StateInfo ()
   
 instance CProg (AST.CFunctionDef N.NodeInfo)  where
-  buildCFG (AST.CFunDef tySpecfs declarator decls stmt nodeInfo)  = {- stmt must be compound -} 
-    buildCFG stmt >> return ()
+  buildCFG (AST.CFunDef tySpecfs declarator decls stmt nodeInfo)  = do {- stmt must be compound -} 
+    { buildCFG stmt 
+    ; st <- get
+    ; put st{cfg = insertGotos (cfg st)}
+    ; return ()
+    }
   
 
 -- CFG, newNodeId, predIds, continuable |- stmt => CFG', newNodeId', predIds', continuable'
@@ -554,4 +558,32 @@ getLHSVarFromExp _                            = [] -- todo to check whether we m
 
 
 
+
+-- ^ insert goto statement according to the succ 
+-- ^ 1. skipping if statement
+-- ^ 2. insert only the last statement is not goto
+insertGotos :: CFG -> CFG
+insertGotos cfg = 
+  let containsIf :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool
+      containsIf items = any (\item -> case item of
+                                 { (AST.CBlockStmt (AST.CIf _ _ _ _)) -> True 
+                                 ; _ -> False 
+                                 }) items
+                         
+      endsWithGoto :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+      endsWithGoto [] = False
+      endsWithGoto [AST.CBlockStmt (AST.CGoto succ _)] = True
+      endsWithGoto (_:xs) = endsWithGoto xs
+      
+      insertGT :: Node -> Node 
+      insertGT node | containsIf (stmts node) = node
+                    | endsWithGoto (stmts node) = node
+                    | otherwise = case succs node of
+                      { [] -> -- the last node
+                           node
+                      ; (succ:_) -> -- should be singleton
+                        let gt = (AST.CBlockStmt (AST.CGoto succ N.undefNode))
+                        in node{stmts=(stmts node) ++ [gt]}
+                      }
+  in M.map insertGT cfg
 
