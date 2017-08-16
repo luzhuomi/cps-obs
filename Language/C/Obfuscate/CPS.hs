@@ -33,7 +33,7 @@ testCPS = do
                 ; let cps = ssa2cps fundef (buildSSA (cfg state))
                 ; -- putStrLn $ show $ cps
                 ; putStrLn $ render $ pretty (cps_ctxt cps)
-                ; mapM_  (\f -> putStrLn $ render $ pretty f) (cps_funcs cps)
+                ; mapM_  (\f -> putStrLn $ render $ pretty f) ((cps_funcs cps) ++ [cps_main cps])
                 }
            ; CFGError s       -> error s
            }
@@ -92,6 +92,7 @@ data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main fun
                , cps_stmts :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function stmts
                , cps_funcs :: [AST.CFunctionDef N.NodeInfo] -- ^ generated auxillary functions
                , cps_ctxt  :: AST.CDeclaration N.NodeInfo -- ^ the context for the closure
+               , cps_main ::  AST.CFunctionDef N.NodeInfo -- ^ the main function
                } deriving Show
                           
 -- global names                          
@@ -501,10 +502,18 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
         -- forall arg. ctxt->arg 
         [ AST.CBlockStmt (AST.CExpr (Just (AST.CAssign AST.CAssignOp ((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) (AST.CVar arg N.undefNode) N.undefNode)) N.undefNode) | 
           arg <- formalArgIds
-        ] 
-      
-  in CPS main_decls main_stmts ps context 
-
+        ] ++ [
+          AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((internalIdent funName) `app` (internalIdent (labPref ++ "0" ))) N.undefNode) 
+                                           [AST.CUnary AST.CAdrOp (AST.CVar (internalIdent "id") N.undefNode) N.undefNode] N.undefNode)) N.undefNode)
+          ]
+        
+      main_func = case fundef of 
+        { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
+             AST.CFunDef tySpecfs declarator decls (AST.CCompound [] (main_decls ++ main_stmts) N.undefNode) nodeInfo 
+        }
+  in CPS main_decls main_stmts ps context main_func
+     
+     
 getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
 getFunName (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getDeclrName declarator
 
