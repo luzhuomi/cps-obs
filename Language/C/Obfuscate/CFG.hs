@@ -11,6 +11,7 @@ import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
+import Language.C.Syntax.Constants
 
 import Control.Applicative
 import Control.Monad.State as M hiding (State)
@@ -20,6 +21,7 @@ import Control.Monad.State as M hiding (State)
 import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
+
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
@@ -199,7 +201,7 @@ CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {x = 
 CFG, max, preds, false |- x = exp => CFG1, max1, [], false 
 -}
   
-  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1)) nodeInfo) = do  
+  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1)) nodeInfo) = do  -- todo : what about lhs += rhs
     { st <- get
     ; let lhs      = getLHSVarFromExp lval
           rhs      = getRHSVarFromExp rval
@@ -224,6 +226,14 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
+  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreIncOp e nodeInfo')) nodeInfo) = -- todo: what about the ++e and --e is a sub expression of some other expression
+    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostIncOp e nodeInfo')) nodeInfo) = 
+    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreDecOp e nodeInfo')) nodeInfo) = 
+    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostDecOp e nodeInfo')) nodeInfo) = 
+    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
   -- not assigment, pretty much the same as the assignment expression except that we don't care about the lhs vars
   buildCFG (AST.CExpr (Just exp) nodeInfo) =  do  
     { st <- get
@@ -604,7 +614,13 @@ getRHSVarFromExp (AST.CIndex arr idx _ )       = getRHSVarFromExp arr ++ getRHSV
 getRHSVarFromExp (AST.CCall f args _ )         = getRHSVarFromExp f ++ concatMap getRHSVarFromExp args
 getRHSVarFromExp (AST.CMember e ident deref _) = getRHSVarFromExp e
 getRHSVarFromExp (AST.CVar ident _)            = [ident]
-getRHSVarFromExp _                             = [] -- todo: const, C99 compound literal, C11 generic selction, GNU C compunter statement as expr, GNU C label of address, builtin express
+getRHSVarFromExp (AST.CConst c)                = []
+getRHSVarFromExp (AST.CCompoundLit decl initList _ ) = concatMap (\(partDesignators, init) -> (concatMap getVarFromPartDesignator partDesignators ++ getVarFromInit init)) initList
+-- getRHSVarFromExp (AST.CGenericSelection e selector _ ) = [] -- todo c11 generic selection
+getRHSVarFromExp (AST.CStatExpr stmt _ )       = [] -- todo GNU C compount statement as expr
+getRHSVarFromExp (AST.CLabAddrExpr ident _ )   = [] 
+getRHSVarFromExp (AST.CBuiltinExpr builtin )   = [] -- todo build in expression
+
 
 getVarFromExp :: AST.CExpression a -> [Ident]
 getVarFromExp = getRHSVarFromExp

@@ -23,7 +23,7 @@ renamePure rstate x = case MS.runState (rename x) rstate of
 -- variable renaming
 data RenameState = RSt { lbl         :: Ident 
                        , rn_env      :: M.Map Ident Ident -- ^ variable -> renamed variable
-                       , local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ inner declaralation to be made to be function scope after renaming
+                       , local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ inner declaralation to be made to be function scope (the renaming should be done during translation to CPS)
                        }
                  deriving Show
 

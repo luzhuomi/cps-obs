@@ -299,8 +299,8 @@ data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined
                              
 -- ^ a SSA function declaration AST. We only care about the body of the function. We 
 -- apply translation on individual function.
-data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration
-               , labelled_blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block
+data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration (not yet renamed)
+               , labelled_blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block (renamed)
                }
            deriving Show
 {-  The SSA Language
@@ -417,18 +417,12 @@ buildSSA cfg =
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
           ssa =  foldl eachNode (SSA [] M.empty) $ M.toList cfg
-      in ssa{scoped_decls = map (\decl -> renameLabel0 decl) (scoped_decls ssa)}  -- the scoped_delcs were not yet renamed.
+      in ssa   -- the scoped_decls were not yet renamed.
     }
 
 
 
                  
-renameLabel0 :: AST.CDeclaration N.NodeInfo ->  AST.CDeclaration N.NodeInfo
-renameLabel0 decl = 
-  let label0 = internalIdent $ labPref ++ "0" 
-      rnState = RSt label0 M.empty [] 
-  in case renamePure rnState decl of 
-    { (decl', rstate') -> decl' }
       
 
 

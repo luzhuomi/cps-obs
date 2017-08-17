@@ -449,19 +449,28 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
 -- it seems just to be identical 
 -- for C target, we need to rename x to ctxt->x
 cps_trans_exp :: ContextName -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
-cps_trans_exp ctxtName (AST.CVar id _) = (cvar (iid ctxtName)) .->. id
-cps_trans_exp ctxtName (AST.CAssign op lhs rhs nodeInfo) = AST.CAssign op (cps_trans_exp ctxtName lhs) (cps_trans_exp ctxtName rhs) nodeInfo
-cps_trans_exp ctxtName (AST.CComma es nodeInfo) = AST.CComma (map (cps_trans_exp ctxtName) es) nodeInfo
-cps_trans_exp ctxtName (AST.CCond e1 Nothing e3 nodeInfo) = AST.CCond (cps_trans_exp ctxtName e1) Nothing (cps_trans_exp ctxtName e3) nodeInfo
+cps_trans_exp ctxtName (AST.CAssign op lhs rhs nodeInfo)    = AST.CAssign op (cps_trans_exp ctxtName lhs) (cps_trans_exp ctxtName rhs) nodeInfo
+cps_trans_exp ctxtName (AST.CComma es nodeInfo)             = AST.CComma (map (cps_trans_exp ctxtName) es) nodeInfo
+cps_trans_exp ctxtName (AST.CCond e1 Nothing e3 nodeInfo)   = AST.CCond (cps_trans_exp ctxtName e1) Nothing (cps_trans_exp ctxtName e3) nodeInfo
 cps_trans_exp ctxtName (AST.CCond e1 (Just e2) e3 nodeInfo) = AST.CCond (cps_trans_exp ctxtName e1) (Just $ cps_trans_exp ctxtName e2) (cps_trans_exp ctxtName e3) nodeInfo
-cps_trans_exp ctxtName (AST.CBinary op e1 e2 nodeInfo) = AST.CBinary op (cps_trans_exp ctxtName e1)  (cps_trans_exp ctxtName e2) nodeInfo
-cps_trans_exp ctxtName (AST.CCast decl e nodeInfo) = AST.CCast decl (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CUnary op e nodeInfo) = AST.CUnary op (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CSizeofExpr e nodeInfo) = AST.CSizeofExpr (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CSizeofType decl nodeInfo) = AST.CSizeofType decl nodeInfo
-cps_trans_exp ctxtName (AST.CAlignofExpr e nodeInfo) = AST.CAlignofExpr (cps_trans_exp ctxtName e) nodeInfo
-
-cps_trans_exp ctxtName e = e
+cps_trans_exp ctxtName (AST.CBinary op e1 e2 nodeInfo)  = AST.CBinary op (cps_trans_exp ctxtName e1)  (cps_trans_exp ctxtName e2) nodeInfo
+cps_trans_exp ctxtName (AST.CCast decl e nodeInfo)      = AST.CCast decl (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CUnary op e nodeInfo)       = AST.CUnary op (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CSizeofExpr e nodeInfo)     = AST.CSizeofExpr (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CSizeofType decl nodeInfo)  = AST.CSizeofType decl nodeInfo
+cps_trans_exp ctxtName (AST.CAlignofExpr e nodeInfo)    = AST.CAlignofExpr (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CAlignofType decl nodeInfo) = AST.CAlignofType decl nodeInfo
+cps_trans_exp ctxtName (AST.CComplexReal e nodeInfo)    = AST.CComplexReal (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CComplexImag e nodeInfo)    = AST.CComplexImag (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CIndex (cps_trans_exp ctxtName arr) (cps_trans_exp ctxtName idx) nodeInfo
+cps_trans_exp ctxtName (AST.CCall f args nodeInfo)      = AST.CCall (cps_trans_exp ctxtName f) (map (cps_trans_exp ctxtName) args) nodeInfo
+cps_trans_exp ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp ctxtName e) ident deref nodeInfo
+cps_trans_exp ctxtName (AST.CVar id _)                      = (cvar (iid ctxtName)) .->. id
+cps_trans_exp ctxtName (AST.CConst c)                       = AST.CConst c
+cps_trans_exp ctxtName (AST.CCompoundLit decl initList nodeInfo) = AST.CCompoundLit decl initList nodeInfo -- todo check this
+cps_trans_exp ctxtName (AST.CStatExpr stmt nodeInfo )       = AST.CStatExpr stmt nodeInfo  -- todo GNU C compount statement as expr
+cps_trans_exp ctxtName (AST.CLabAddrExpr ident nodeInfo )   = AST.CLabAddrExpr ident nodeInfo -- todo  
+cps_trans_exp ctxtName (AST.CBuiltinExpr builtin )          = AST.CBuiltinExpr builtin -- todo build in expression
 
 {-
 top level translation   p => P
@@ -490,7 +499,8 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
       formalArgIds = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
       ctxtName = funName ++ "Ctxt"
       -- the context struct declaration
-      context = mkContext ctxtName formalArgDecls scopedDecls 
+      labels = M.keys labelledBlocks
+      context = mkContext ctxtName labels formalArgDecls scopedDecls 
       -- all the "nested" function declarations
       ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} labelledBlocks
       main_decls = 
@@ -569,17 +579,27 @@ cvar id = AST.CVar id N.undefNode
 iid :: String -> Ident
 iid id = internalIdent id
 
-mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext name formal_arg_decls local_var_decls = -- todo the loop higher function stack
+mkContext :: String -> [Ident] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
+mkContext name labels formal_arg_decls local_var_decls = -- todo the loop higher function stack
   let structName  = internalIdent name
       ctxtAlias = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs     = []
-      decls'    = formal_arg_decls ++ local_var_decls
+      decls'    = formal_arg_decls ++ concatMap (\d -> renameDeclWithLabels d labels) local_var_decls
       tyDef     = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef =
         AST.CTypeSpec (AST.CSUType
                        (AST.CStruct AST.CStructTag (Just structName) (Just decls') attrs N.undefNode) N.undefNode) 
   in AST.CDecl [tyDef, structDef] [(Just ctxtAlias, Nothing, Nothing)] N.undefNode
+
+
+
+renameDeclWithLabels :: AST.CDeclaration N.NodeInfo -> [Ident] -> [AST.CDeclaration N.NodeInfo]
+renameDeclWithLabels decl labels = map (renameDeclWithLabel decl) labels
+  
+renameDeclWithLabel decl label =   
+  let rnState = RSt label M.empty [] 
+  in case renamePure rnState decl of 
+    { (decl', rstate') -> decl' }
 
 
 {-
