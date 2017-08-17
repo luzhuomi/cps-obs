@@ -236,16 +236,16 @@ cps_trans_lb ctxtName fname lb_map ident lb =
   let fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
-      k      = internalIdent kParamName
+      k      = iid kParamName
       paramK = AST.CDecl tyVoid -- void (*k)(ctxt *)
                [(Just (AST.CDeclr (Just k) 
                        [ AST.CPtrDeclr [] N.undefNode
-                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode) ] 
+                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
                                                 [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
                                                 N.undefNode], False)
                                        ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
-      paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)]  -- ctxt* ctxt
-                  [(Just (AST.CDeclr (Just (internalIdent ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+      paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                  [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
       paramDeclr = [paramK, paramCtxt]
       decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
       mb_strLitr = Nothing
@@ -280,9 +280,9 @@ cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CGoto 
   { Just lb | not (null (phis lb)) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
-           args    = [ (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
-                     , AST.CVar (internalIdent ctxtName) N.undefNode ] 
-           funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
+           args    = [ (cvar (iid ctxtName)) .->. k
+                     , cvar (iid ctxtName)] 
+           funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
        in asgmts ++ [ funcall ]
 {-
 l_i : { s } \in \bar{b}    
@@ -291,9 +291,9 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
 -}                                   
             | otherwise      -> 
          let fname'  = fname `app` li
-             args    = [ (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
-                       , AST.CVar (internalIdent ctxtName) N.undefNode ] 
-             funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
+             args    = [ (cvar (iid ctxtName)) .->. k
+                       , cvar (iid ctxtName) ] 
+             funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
          in [ funcall ]
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
   }
@@ -307,7 +307,7 @@ x => X; e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 ----------------------------------------------------------------------------- (SeqAssign)
 fn, K, \bar{\Delta}, \bar{b} |-_l x = e;s => X = E;S
 -}             
-     let e' = cps_trans_exp e
+     let e' = cps_trans_exp ctxtName e
      in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
    ; _ -> 
 {-                                                                                        
@@ -315,7 +315,7 @@ e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 ----------------------------------------------------------------------------- (SeqE)
 fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
 -}     
-     let e' = cps_trans_exp e
+     let e' = cps_trans_exp ctxtName e
      in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
    }
 {-
@@ -326,7 +326,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -- K is passed in as a formal arg
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (AST.CVar k N.undefNode) N.undefNode ) [] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (cvar k) N.undefNode ) [] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
@@ -338,9 +338,9 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -- x_r and K belong to the contxt
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (AST.CVar k N.undefNode) N.undefNode ) [] N.undefNode)) N.undefNode)
-      e' = cps_trans_exp e
-      assign = ((AST.CVar (internalIdent ctxtName) N.undefNode) .->. (internalIdent "x_r")) .=. e' 
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CUnary AST.CIndOp (cvar k) N.undefNode ) [] N.undefNode)) N.undefNode)
+      e' = cps_trans_exp ctxtName e
+      assign = ((cvar (iid ctxtName)) .->. (iid "x_r")) .=. e' 
   in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
      
@@ -354,7 +354,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
 -}  
 -- in C, f_l1 and f_l2 need to be passed in as address &
   | inDelta = 
-    let exp' = cps_trans_exp exp
+    let exp' = cps_trans_exp ctxtName exp
         lbl_tr = case trueStmt of 
           { AST.CGoto lbl _ -> lbl 
           ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
@@ -363,13 +363,13 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
           { Just (AST.CGoto lbl _) -> lbl 
           ; _ -> error "cps_trans_stmt error: the false statement in a looping if statement does not contain goto"
           }
-        fname' = internalIdent "cps_loop"
+        fname' = iid "cps_loop"
         args   = [ exp' -- todo put lambda
-                 , AST.CUnary AST.CAdrOp (AST.CVar (fname `app` lbl_tr) N.undefNode) N.undefNode
-                 , AST.CUnary AST.CAdrOp (AST.CVar (fname `app` lbl_fl) N.undefNode) N.undefNode
-                 , (AST.CVar (internalIdent ctxtName) N.undefNode) .->. k
+                 , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_tr)) N.undefNode
+                 , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_fl)) N.undefNode
+                 , (cvar (iid ctxtName)) .->. k
                  ]
-        funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar fname' N.undefNode) args N.undefNode)) N.undefNode)
+        funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
     in [ funcall ]
 {-
 l \not \in \Delta
@@ -395,11 +395,11 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } els
             ; items -> AST.CCompound [] items N.undefNode
             }
           }
-        exp' = cps_trans_exp exp
+        exp' = cps_trans_exp ctxtName exp
     in [AST.CBlockStmt (AST.CIf exp' trueStmt' mbFalseStmt' nodeInfo)]
 
 
-cps_trans_stmt ctxtName fname k lb_map ident inDelta stmt = undefined
+cps_trans_stmt ctxtName fname k lb_map ident inDelta stmt = error "cps_trans_stmt error: unhandled case"
      
 
 
@@ -412,11 +412,7 @@ cps_trans_phis ::  ContextName ->
 cps_trans_phis ctxtName src_lb dest_lb ps = map (cps_trans_phi ctxtName src_lb dest_lb) ps
 
 
-(.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
-(.->.) struct member = AST.CMember struct member True N.undefNode
 
-(...) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
-(...) struct member = AST.CMember struct member False N.undefNode
 
 
 
@@ -434,8 +430,8 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
   case lookup src_lb pairs of -- look for the matching label according to the source label
     { Nothing           -> error "cps_trans_phi failed: can't find the source label from the incoming block labels."
     ; Just redefined_lb -> -- lbl in which the var is redefined (it could be the precedence of src_lb)
-      let lhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` dest_lb)
-          rhs = (AST.CVar (internalIdent ctxtName) N.undefNode) .->. (var `app` redefined_lb)
+      let lhs = (cvar (iid ctxtName)) .->. (var `app` dest_lb)
+          rhs = (cvar (iid ctxtName)) .->. (var `app` redefined_lb)
       in AST.CBlockStmt (AST.CExpr (Just (lhs .=. rhs)) N.undefNode) -- todo check var has been renamed with label
     }
 
@@ -451,8 +447,21 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
  e(\bar{e}) => E(\bar{E})
 -}
 -- it seems just to be identical 
-cps_trans_exp :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
-cps_trans_exp e = e
+-- for C target, we need to rename x to ctxt->x
+cps_trans_exp :: ContextName -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+cps_trans_exp ctxtName (AST.CVar id _) = (cvar (iid ctxtName)) .->. id
+cps_trans_exp ctxtName (AST.CAssign op lhs rhs nodeInfo) = AST.CAssign op (cps_trans_exp ctxtName lhs) (cps_trans_exp ctxtName rhs) nodeInfo
+cps_trans_exp ctxtName (AST.CComma es nodeInfo) = AST.CComma (map (cps_trans_exp ctxtName) es) nodeInfo
+cps_trans_exp ctxtName (AST.CCond e1 Nothing e3 nodeInfo) = AST.CCond (cps_trans_exp ctxtName e1) Nothing (cps_trans_exp ctxtName e3) nodeInfo
+cps_trans_exp ctxtName (AST.CCond e1 (Just e2) e3 nodeInfo) = AST.CCond (cps_trans_exp ctxtName e1) (Just $ cps_trans_exp ctxtName e2) (cps_trans_exp ctxtName e3) nodeInfo
+cps_trans_exp ctxtName (AST.CBinary op e1 e2 nodeInfo) = AST.CBinary op (cps_trans_exp ctxtName e1)  (cps_trans_exp ctxtName e2) nodeInfo
+cps_trans_exp ctxtName (AST.CCast decl e nodeInfo) = AST.CCast decl (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CUnary op e nodeInfo) = AST.CUnary op (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CSizeofExpr e nodeInfo) = AST.CSizeofExpr (cps_trans_exp ctxtName e) nodeInfo
+cps_trans_exp ctxtName (AST.CSizeofType decl nodeInfo) = AST.CSizeofType decl nodeInfo
+cps_trans_exp ctxtName (AST.CAlignofExpr e nodeInfo) = AST.CAlignofExpr (cps_trans_exp ctxtName e) nodeInfo
+
+cps_trans_exp ctxtName e = e
 
 {-
 top level translation   p => P
@@ -483,28 +492,28 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
       -- the context struct declaration
       context = mkContext ctxtName formalArgDecls scopedDecls 
       -- all the "nested" function declarations
-      ps = cps_trans_lbs ctxtName (internalIdent funName) {- (internalIdent "id") -} labelledBlocks
+      ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} labelledBlocks
       main_decls = 
         -- 1. malloc the context
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
         [ AST.CBlockDecl (AST.CDecl 
-                          [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] 
-                          [(Just (AST.CDeclr (Just (internalIdent "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),
+                          [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] 
+                          [(Just (AST.CDeclr (Just (iid "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),
                             Just (AST.CInitExpr 
-                                  (AST.CCast (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] 
+                                  (AST.CCast (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] 
                                               [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode) 
-                                   (AST.CCall (AST.CVar (internalIdent "malloc") N.undefNode) 
-                                    [AST.CSizeofType (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (internalIdent ctxtName) N.undefNode)] [] N.undefNode) N.undefNode] N.undefNode) N.undefNode) N.undefNode),Nothing)] N.undefNode)
+                                   (AST.CCall (AST.CVar (iid "malloc") N.undefNode) 
+                                    [AST.CSizeofType (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [] N.undefNode) N.undefNode] N.undefNode) N.undefNode) N.undefNode),Nothing)] N.undefNode)
         ] 
       -- formalArgs = undefined
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
-        [ AST.CBlockStmt (AST.CExpr (Just (((AST.CVar (internalIdent "ctxt") N.undefNode) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid "ctxt")) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
           arg <- formalArgIds
         ] ++ [
-          AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((internalIdent funName) `app` (internalIdent (labPref ++ "0" ))) N.undefNode) 
-                                           [AST.CUnary AST.CAdrOp (AST.CVar (internalIdent "id") N.undefNode) N.undefNode] N.undefNode)) N.undefNode)
+          AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
+                                           [AST.CUnary AST.CAdrOp (AST.CVar (iid "id") N.undefNode) N.undefNode] N.undefNode)) N.undefNode)
           ]
         
       main_func = case fundef of 
@@ -543,9 +552,22 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
                                                                    }) trips
 
 
+-- combinators for the ease of constructing the AST 
 
 (.=.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.=.) lhs rhs = AST.CAssign AST.CAssignOp lhs rhs N.undefNode
+
+(.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
+(.->.) struct member = AST.CMember struct member True N.undefNode
+
+(...) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
+(...) struct member = AST.CMember struct member False N.undefNode
+
+cvar :: Ident -> AST.CExpression N.NodeInfo
+cvar id = AST.CVar id N.undefNode
+
+iid :: String -> Ident
+iid id = internalIdent id
 
 mkContext :: String -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
 mkContext name formal_arg_decls local_var_decls = -- todo the loop higher function stack
