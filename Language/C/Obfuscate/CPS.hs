@@ -280,7 +280,7 @@ cps_trans_stmt ctxtName fname k lb_map ident inDelta (AST.CBlockStmt (AST.CGoto 
   { Just lb | not (null (phis lb)) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
-           args    = [ (cvar (iid ctxtName)) .->. k
+           args    = [ cvar k
                      , cvar (iid ctxtName)] 
            funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
        in asgmts ++ [ funcall ]
@@ -291,7 +291,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
 -}                                   
             | otherwise      -> 
          let fname'  = fname `app` li
-             args    = [ (cvar (iid ctxtName)) .->. k
+             args    = [ cvar k
                        , cvar (iid ctxtName) ] 
              funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
          in [ funcall ]
@@ -367,7 +367,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
         args   = [ exp' -- todo put lambda
                  , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_tr)) N.undefNode
                  , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_fl)) N.undefNode
-                 , (cvar (iid ctxtName)) .->. k
+                 , cvar k
                  ]
         funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
     in [ funcall ]
