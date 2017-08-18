@@ -523,7 +523,8 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks) =
           arg <- formalArgIds
         ] ++ [
           AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
-                                           [AST.CUnary AST.CAdrOp (AST.CVar (iid "id") N.undefNode) N.undefNode] N.undefNode)) N.undefNode)
+                                           [ AST.CUnary AST.CAdrOp (AST.CVar (iid "id") N.undefNode) N.undefNode
+                                           , AST.CVar (iid "ctxt") N.undefNode ] N.undefNode)) N.undefNode)
           ]
         
       main_func = case fundef of 
@@ -579,12 +580,31 @@ cvar id = AST.CVar id N.undefNode
 iid :: String -> Ident
 iid id = internalIdent id
 
+
+voidTy = AST.CVoidType N.undefNode
+
+-- ^ making the context struct declaration
 mkContext :: String -> [Ident] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext name labels formal_arg_decls local_var_decls = -- todo the loop higher function stack
-  let structName  = internalIdent name
+mkContext name labels formal_arg_decls local_var_decls = -- todo the loop higher order function stack
+  let structName  = iid name
       ctxtAlias = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs     = []
-      decls'    = formal_arg_decls ++ concatMap (\d -> renameDeclWithLabels d labels) local_var_decls
+      stackSize = 20
+      unaryFuncStack fname = AST.CDecl [AST.CTypeSpec voidTy] -- void (*loop_ks[2])(struct FuncCtxt*);
+                             -- todo : these are horrible to read, can be simplified via some combinators
+                             
+                    [(Just (AST.CDeclr (Just $ iid fname) [ AST.CArrDeclr [] (AST.CArrSize False (AST.CConst (AST.CIntConst (cInteger stackSize) N.undefNode))) N.undefNode
+                                                              , AST.CPtrDeclr [] N.undefNode
+                                                              , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode) ,Nothing,Nothing)] N.undefNode
+      binaryFuncStack fname = AST.CDecl [AST.CTypeSpec voidTy] 
+                              [(Just (AST.CDeclr (Just $ iid fname) [ AST.CArrDeclr [] (AST.CArrSize False (AST.CConst (AST.CIntConst (cInteger stackSize) N.undefNode))) N.undefNode
+                                                                    , AST.CPtrDeclr [] N.undefNode
+                                                                    , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CVoidType N.undefNode)] [(Just (AST.CDeclr (Just (iid "k")) [AST.CPtrDeclr [] N.undefNode, AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode, AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode) ,Nothing,Nothing)] N.undefNode
+      ksStack   = unaryFuncStack "loop_ks"
+      condStack = unaryFuncStack "loop_conds"                                    
+      visitorStack = binaryFuncStack "loop_visitors"
+      exitStack = binaryFuncStack "exit_visitors"
+      decls'    = formal_arg_decls ++ concatMap (\d -> renameDeclWithLabels d labels) local_var_decls ++ [ksStack, condStack, visitorStack, exitStack]
       tyDef     = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef =
         AST.CTypeSpec (AST.CSUType
