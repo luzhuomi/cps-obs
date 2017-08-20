@@ -63,6 +63,22 @@ reach src context exclude cfg
     
 type SDom = M.Map Ident (S.Set Ident)
 
+
+domBy :: SDom -> 
+         Ident -> -- ^ dominator
+         Ident -> -- ^ dominatee
+         Bool
+domBy sdom dtor dtee = (dtor == dtee) || (sdomBy sdom dtor dtee)
+  
+sdomBy :: SDom -> 
+          Ident -> -- ^ dominator
+          Ident -> -- ^ dominatee
+          Bool
+sdomBy sdom dtor dtee = case M.lookup dtor sdom of  
+  { Nothing -> False
+  ; Just dominatees -> dtee `S.member` dominatees 
+  }
+
                      
 -- ^ build a sdom relation
 -- a sdom b means for all path p in cfg starting from 0 to b, a is in p and a != b
@@ -300,7 +316,8 @@ data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined
 -- ^ a SSA function declaration AST. We only care about the body of the function. We 
 -- apply translation on individual function.
 data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration (not yet renamed)
-               , labelled_blocks :: M.Map Ident LabeledBlock       -- ^ translated labelled block (renamed)
+               , labelled_blocks :: M.Map Ident LabeledBlock     -- ^ translated labelled block (renamed)
+               , sdom_ssa :: SDom                                   -- ^ we need the sdom for SSA to CPS translation
                }
            deriving Show
 {-  The SSA Language
@@ -416,7 +433,7 @@ buildSSA cfg =
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
-          ssa =  foldl eachNode (SSA [] M.empty) $ M.toList cfg
+          ssa =  foldl eachNode (SSA [] M.empty sdom) $ M.toList cfg
       in ssa   -- the scoped_decls were not yet renamed.
     }
 
