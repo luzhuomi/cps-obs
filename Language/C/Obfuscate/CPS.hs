@@ -614,7 +614,14 @@ allExits lbs = M.fromList $
 -- ^ retrieve all condional test from the loops and turn them into functions     
 allLoopConds :: ContextName -> M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
 allLoopConds ctxtName lbs = -- concatMap loopCond (M.
-  
+  concatMap (\(id,lb)-> loopCond ctxtName lb) (M.toList lbs)
+
+loopCond :: ContextName -> (NodeID, LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
+loopCond ctxtName lb | lb_loop lb =
+                       let stmts = lb_stmts lb
+                           conds = [ e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
+                       in undefined
+                     | otherwise  = [] 
 
 -- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
