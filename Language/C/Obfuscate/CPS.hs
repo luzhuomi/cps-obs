@@ -561,7 +561,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       visitors = allVisitors sdom labelledBlocks
       exits    = allExits labelledBlocks
       -- all the conditional function 
-      conds    = allLoopConds ctxtName labelledBlocks 
+      conds    = allLoopConds ctxtName funName labelledBlocks 
       -- all the "nested/helper" function declarations
       ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       main_decls = 
@@ -612,16 +612,18 @@ allExits lbs = M.fromList $
                
 
 -- ^ retrieve all condional test from the loops and turn them into functions     
-allLoopConds :: ContextName -> M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
-allLoopConds ctxtName lbs = -- concatMap loopCond (M.
-  concatMap (\(id,lb)-> loopCond ctxtName lb) (M.toList lbs)
+allLoopConds :: ContextName -> String ->  M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
+allLoopConds ctxtName fname lbs = -- concatMap loopCond (M.
+  concatMap (\(id,lb)-> loopCond ctxtName fname (id,lb)) (M.toList lbs)
 
-loopCond :: ContextName -> (NodeID, LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
-loopCond ctxtName lb | lb_loop lb =
-                       let stmts = lb_stmts lb
-                           conds = [ e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
-                       in undefined
-                     | otherwise  = [] 
+loopCond :: ContextName -> String -> (NodeId, LabeledBlock) -> [AST.CFunctionDef N.NodeInfo]
+loopCond ctxtName fname (l,blk) 
+  | lb_loop blk =
+    let stmts = lb_stmts blk
+        conds = [ cps_trans_exp ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
+        decls = undefined
+    in undefined
+  | otherwise  = [] 
 
 -- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
