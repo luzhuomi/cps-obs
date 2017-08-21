@@ -560,10 +560,12 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       -- finding the visitor labels and the exit labels
       visitors = allVisitors sdom labelledBlocks
       exits    = allExits labelledBlocks
-      -- all the "nested" function declarations
+      -- all the conditional function 
+      conds    = allLoopConds ctxtName labelledBlocks 
+      -- all the "nested/helper" function declarations
       ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       main_decls = 
-        -- 1. malloc the context
+        -- 1. malloc the context obj in the main func
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
         [ AST.CBlockDecl (AST.CDecl 
                           [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] 
@@ -574,7 +576,6 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
                                    (AST.CCall (AST.CVar (iid "malloc") N.undefNode) 
                                     [AST.CSizeofType (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [] N.undefNode) N.undefNode] N.undefNode) N.undefNode) N.undefNode),Nothing)] N.undefNode)
         ] 
-      -- formalArgs = undefined
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
@@ -610,12 +611,14 @@ allExits lbs = M.fromList $
   , (lb_loop lblk) && (length (lb_succs lblk) > 1) ] 
                
 
-     
+-- ^ retrieve all condional test from the loops and turn them into functions     
+allLoopConds :: ContextName -> M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
+allLoopConds ctxtName lbs = -- concatMap loopCond (M.
+  
+
+-- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
-getFunReturnTy (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = tySpecfs {- concatMap (\tySpecf -> case tySpecf of  
-                                                                               { AST.CTypeSpec ty -> [ty]
-                                                                               ; _ -> [] -- todo: check qualifiers, storage specifier and fun align
-                                                                               }) tySpecfs -}
+getFunReturnTy (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = tySpecfs 
 
 getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
 getFunName (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getDeclrName declarator
