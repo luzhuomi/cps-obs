@@ -20,8 +20,8 @@ import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 -- TODO LIST:
--- 1. all conds 
--- 2. id
+-- 1. check whether k vs kParam
+-- 2. id, loop an loop lambda
 -- 3. pop and push
 -- 4. function signatures
 -- 5. max stack size
@@ -268,7 +268,7 @@ cps_trans_lb ctxtName fname lb_map ident visitors exits  lb  =
       decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
       mb_strLitr = Nothing
       attrs  =  []
-      pop   | ident `M.member` exits = [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "pop"))) [cvar $ iid ctxtName] N.undefNode)) N.undefNode) ] 
+      pop   | ident `M.member` exits = [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "pop"))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) ] 
             | otherwise              = []
       stmt' =  AST.CCompound [] (pop ++ (cps_trans_stmts ctxtName fname k lb_map ident (lb_loop lb) visitors exits (lb_stmts lb))) N.undefNode      
   in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
@@ -313,9 +313,9 @@ cps_trans_stmt ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockS
        let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
            fname'  = fname `app` li
            args    = [ cvar k
-                     , cvar (iid ctxtName)] 
+                     , cvar (iid ctxtParamName)] 
            funcall = case M.lookup ident visitors of -- in case it is the last block of descending from the loop-if then branch, we call (*k)(ctxt) instead
-             { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar k) [cvar (iid ctxtName)] N.undefNode)) N.undefNode) 
+             { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar k) [cvar (iid ctxtParamName)] N.undefNode)) N.undefNode) 
              ; _ -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
              }
        in asgmts ++ [ funcall ]
@@ -327,7 +327,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
             | otherwise      -> 
          let fname'  = fname `app` li
              args    = [ cvar k
-                       , cvar (iid ctxtName) ] 
+                       , cvar (iid ctxtParamName) ] 
              funcall = case M.lookup ident visitors of -- in case it is the last block of descending from the loop-if then branch, we call (*k)(ctxt) instead
                { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar k) [cvar (iid ctxtName)] N.undefNode)) N.undefNode) 
                ; _ -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
@@ -364,7 +364,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -- K is passed in as a formal arg
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtName))] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
@@ -376,9 +376,9 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -- x_r and K belong to the contxt
 -- K is a pointer to function
 cps_trans_stmt ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtName))] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
       e' = cps_trans_exp ctxtName e
-      assign = ((cvar (iid ctxtName)) .->. (iid "func_result")) .=. e' 
+      assign = ((cvar (iid ctxtParamName)) .->. (iid "func_result")) .=. e' 
   in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
      
@@ -411,16 +411,16 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
                     , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_tr)) N.undefNode
                     , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_fl)) N.undefNode
                     , cvar k
-                    , cvar (iid ctxtName)
+                    , cvar (iid ctxtParamName)
                     ]
         push = fname `app` (iid "push")
         call_push = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar push) push_args N.undefNode)) N.undefNode)
         
         loop =  fname `app` iid "loop"
-        loop_args  = [ (cvar (iid ctxtName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtName) .->. (iid "curr_stack_size"))
+        loop_args  = [ (cvar (iid ctxtParamName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
                      ]
                  
         call_loop = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar loop) loop_args N.undefNode)) N.undefNode)
@@ -484,8 +484,8 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
   case lookup src_lb pairs of -- look for the matching label according to the source label
     { Nothing           -> error "cps_trans_phi failed: can't find the source label from the incoming block labels."
     ; Just redefined_lb -> -- lbl in which the var is redefined (it could be the precedence of src_lb)
-      let lhs = (cvar (iid ctxtName)) .->. (var `app` dest_lb)
-          rhs = (cvar (iid ctxtName)) .->. (var `app` redefined_lb)
+      let lhs = (cvar (iid ctxtParamName)) .->. (var `app` dest_lb)
+          rhs = (cvar (iid ctxtParamName)) .->. (var `app` redefined_lb)
       in AST.CBlockStmt (AST.CExpr (Just (lhs .=. rhs)) N.undefNode) -- todo check var has been renamed with label
     }
 
@@ -519,7 +519,7 @@ cps_trans_exp ctxtName (AST.CComplexImag e nodeInfo)    = AST.CComplexImag (cps_
 cps_trans_exp ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CIndex (cps_trans_exp ctxtName arr) (cps_trans_exp ctxtName idx) nodeInfo
 cps_trans_exp ctxtName (AST.CCall f args nodeInfo)      = AST.CCall (cps_trans_exp ctxtName f) (map (cps_trans_exp ctxtName) args) nodeInfo
 cps_trans_exp ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp ctxtName e) ident deref nodeInfo
-cps_trans_exp ctxtName (AST.CVar id _)                      = (cvar (iid ctxtName)) .->. id
+cps_trans_exp ctxtName (AST.CVar id _)                      = (cvar (iid ctxtParamName)) .->. id
 cps_trans_exp ctxtName (AST.CConst c)                       = AST.CConst c
 cps_trans_exp ctxtName (AST.CCompoundLit decl initList nodeInfo) = AST.CCompoundLit decl initList nodeInfo -- todo check this
 cps_trans_exp ctxtName (AST.CStatExpr stmt nodeInfo )       = AST.CStatExpr stmt nodeInfo  -- todo GNU C compount statement as expr
@@ -591,7 +591,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
              AST.CFunDef tySpecfs declarator decls (AST.CCompound [] (main_decls ++ main_stmts) N.undefNode) nodeInfo 
         }
-  in CPS main_decls main_stmts ps context main_func
+  in CPS main_decls main_stmts (ps ++ conds) context main_func
      
 -- ^ get all visitor labels from te labeledblocks map     
 allVisitors :: SDom -> M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
@@ -613,16 +613,19 @@ allExits lbs = M.fromList $
 
 -- ^ retrieve all condional test from the loops and turn them into functions     
 allLoopConds :: ContextName -> String ->  M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
-allLoopConds ctxtName fname lbs = -- concatMap loopCond (M.
-  concatMap (\(id,lb)-> loopCond ctxtName fname (id,lb)) (M.toList lbs)
+allLoopConds ctxtName fname lbs = 
+  concatMap (\(id,lb) -> loopCond ctxtName fname (id,lb)) (M.toList lbs)
 
 loopCond :: ContextName -> String -> (NodeId, LabeledBlock) -> [AST.CFunctionDef N.NodeInfo]
 loopCond ctxtName fname (l,blk) 
   | lb_loop blk =
     let stmts = lb_stmts blk
         conds = [ cps_trans_exp ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
-        decls = undefined
-    in undefined
+        paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                    [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+        decls = [ fun [AST.CTypeSpec boolTy] (iid fname `app` iid "cond" `app` l) [paramCtxt] [AST.CBlockStmt (AST.CReturn (Just cond) N.undefNode)]
+                | cond <- conds ]
+    in decls
   | otherwise  = [] 
 
 -- some AST boilerplate to extract parts from the function declaration
@@ -683,7 +686,15 @@ ind :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 ind e = AST.CUnary AST.CIndOp e N.undefNode
 
 voidTy = AST.CVoidType N.undefNode
-intTy = AST.CIntType N.undefNode
+intTy  = AST.CIntType N.undefNode
+boolTy = intTy
+
+fun :: [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return type
+       Ident ->  -- ^ name 
+       [AST.CDeclaration N.NodeInfo] -> -- ^ params
+       [AST.CCompoundBlockItem N.NodeInfo] -> 
+       AST.CFunctionDef N.NodeInfo
+fun tySpec fname params stmts = AST.CFunDef tySpec (AST.CDeclr (Just fname) [AST.CFunDeclr (Right (params,False)) [] N.undefNode] Nothing [] N.undefNode) [] (AST.CCompound [] stmts N.undefNode) N.undefNode
 
 -- ^ making the context struct declaration
 mkContext :: String -> [Ident] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclarationSpecifier N.NodeInfo] -> AST.CDeclaration N.NodeInfo
