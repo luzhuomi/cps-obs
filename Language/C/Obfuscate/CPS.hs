@@ -627,6 +627,26 @@ loopCond ctxtName fname (l,blk)
                 | cond <- conds ]
     in decls
   | otherwise  = [] 
+                 
+                 
+-- ^ loop_cps 
+loopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+loopCPS ctxtName fname = 
+  let paraCond = undefined
+      paraVisitor = undefined
+      paraExit = undefined
+      paraK    = undefined
+      paraCtxt = undefined
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop") [paraCond, paraVisitor, paraExit, paraK, paraCtxt] [
+    AST.CBlockStmt (AST.CIf (funCall (ind paraCond) [paraCtxt]) 
+                    (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind paraVisitor) [ adr (cvar (iid fname `app` iid "lambda_loop"))
+                                                                                             , cvar (iid ctxtParamName) ]) N.undefNode ) ] N.undefNode)
+                    (Just (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind paraExit) [ cvar (iid kParamName)
+                                                                                                       , cvar (iid ctxtParamName) ]) N.undefNode) ] N.undefNode))
+                   N.undefNode)
+    ]
+                 
+                 
 
 -- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
@@ -685,6 +705,9 @@ iid id = internalIdent id
 ind :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo 
 ind e = AST.CUnary AST.CIndOp e N.undefNode
 
+adr :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo 
+adr e = AST.CUnary AST.CAdrOp e N.undefNode
+
 voidTy = AST.CVoidType N.undefNode
 intTy  = AST.CIntType N.undefNode
 boolTy = intTy
@@ -695,6 +718,10 @@ fun :: [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return type
        [AST.CCompoundBlockItem N.NodeInfo] -> 
        AST.CFunctionDef N.NodeInfo
 fun tySpec fname params stmts = AST.CFunDef tySpec (AST.CDeclr (Just fname) [AST.CFunDeclr (Right (params,False)) [] N.undefNode] Nothing [] N.undefNode) [] (AST.CCompound [] stmts N.undefNode) N.undefNode
+
+
+funCall :: AST.CExpression N.NodeInfo -> [AST.CExpression N.NodeInfo] -> AST.CExpression N.NodeInfo
+funCall f args = AST.CCall f args N.undefNode
 
 -- ^ making the context struct declaration
 mkContext :: String -> [Ident] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclarationSpecifier N.NodeInfo] -> AST.CDeclaration N.NodeInfo
