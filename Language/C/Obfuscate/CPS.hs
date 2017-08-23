@@ -20,11 +20,12 @@ import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 -- TODO LIST:
--- 1. check whether k vs kParam
--- 2. id, loop an loop lambda
--- 3. pop and push
--- 4. function signatures
+-- 1. check whether k vs kParam (done)
+-- 2. id, loop an loop lambda (done)
+-- 3. pop and push (done)
+-- 4. function signatures (done)
 -- 5. max stack size
+-- 6. curr_stack_size + 1 or - 1
 
 testCPS = do 
   { let opts = []
@@ -44,6 +45,7 @@ testCPS = do
                 ; let cps = ssa2cps fundef (buildSSA (cfg state))
                 ; -- putStrLn $ show $ cps
                 ; putStrLn $ render $ pretty (cps_ctxt cps)
+                ; mapM_  (\d -> putStrLn $ render $ pretty d) (cps_funcsigs cps)
                 ; mapM_  (\f -> putStrLn $ render $ pretty f) ((cps_funcs cps) ++ [cps_main cps])
 
                 }
@@ -102,7 +104,8 @@ testCPS = do
 -- ^ a CPS function declaration AST
 data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function decls
                , cps_stmts :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function stmts
-               , cps_funcs :: [AST.CFunctionDef N.NodeInfo] -- ^ generated auxillary functions
+               , cps_funcsigs :: [AST.CDeclaration N.NodeInfo] -- ^ the signatures decls of the auxillary functions
+               , cps_funcs :: [AST.CFunctionDef N.NodeInfo] -- ^ the auxillary functions
                , cps_ctxt  :: AST.CDeclaration N.NodeInfo -- ^ the context for the closure
                , cps_main ::  AST.CFunctionDef N.NodeInfo -- ^ the main function
                } deriving Show
@@ -113,7 +116,7 @@ ctxtParamName = "ctxtParam"
 condParamName = "condParam"
 visitorParamName = "visitorParam"
 exitParamName = "exitParam"
-
+currStackSizeName = "curr_stack_size"
 
 {-
 class CPSize ssa cps where
@@ -420,10 +423,10 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
         call_push = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar push) push_args N.undefNode)) N.undefNode)
         
         loop =  fname `app` iid "loop"
-        loop_args  = [ (cvar (iid ctxtParamName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
-                     , (cvar (iid ctxtParamName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtParamName) .->. (iid "curr_stack_size"))
+        loop_args  = [ (cvar (iid ctxtParamName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
                      ]
                  
         call_loop = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar loop) loop_args N.undefNode)) N.undefNode)
@@ -556,19 +559,26 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       formalArgIds :: [Ident]
       formalArgIds = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
       returnTy = getFunReturnTy fundef
-      ctxtName = funName ++ "Ctxt"
+      ctxtStructName = funName ++ "Ctxt"
       -- the context struct declaration
       labels = M.keys labelledBlocks
-      context = mkContext ctxtName labels formalArgDecls scopedDecls returnTy
+      context = mkContext ctxtStructName labels formalArgDecls scopedDecls returnTy
+      ctxtName = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
       -- finding the visitor labels and the exit labels
       visitors = allVisitors sdom labelledBlocks
       exits    = allExits labelledBlocks
       -- all the conditional function 
       conds    = allLoopConds ctxtName funName labelledBlocks 
-      -- loop_cps and loop_lambda
+      -- loop_cps, loop_lambda, id and pop and push
       loop_cps = loopCPS ctxtName funName
+      lambda_loop_cps = lambdaLoopCPS ctxtName funName
+      id_cps = idCPS ctxtName funName
+      push_cps = pushCPS ctxtName funName
+      pop_cps = popCPS ctxtName funName
       -- all the "nested/helper" function declarations
       ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
+      -- all function signatures
+      funcSignatures = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])
       main_decls = 
         -- 1. malloc the context obj in the main func
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
@@ -584,7 +594,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
-        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid "ctxt")) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
           arg <- formalArgIds
         ] ++ [
           AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
@@ -596,7 +606,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
              AST.CFunDef tySpecfs declarator decls (AST.CCompound [] (main_decls ++ main_stmts) N.undefNode) nodeInfo 
         }
-  in CPS main_decls main_stmts (ps ++ conds ++ [loop_cps]) context main_func
+  in CPS main_decls main_stmts funcSignatures (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])  context main_func 
      
 -- ^ get all visitor labels from te labeledblocks map     
 allVisitors :: SDom -> M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
@@ -633,8 +643,95 @@ loopCond ctxtName fname (l,blk)
     in decls
   | otherwise  = [] 
                  
+
+-- ^ push
+
+{-
+void push(int (*cond)(struct SortCtxt *),
+	  void (*visitor)(void (*k)(struct SortCtxt*), struct SortCtxt*),
+	  void (*exit)(void (*k)(struct SortCtxt*), struct SortCtxt*),
+	  void (*k)(struct SortCtxt*),
+	  sortctxt *ctxt) {
+  ctxt->curr_stack_size = ctxt->curr_stack_size + 1;  
+  ctxt->loop_conds[ctxt->curr_stack_size] = cond;
+  ctxt->loop_visitors[ctxt->curr_stack_size] = visitor;
+  ctxt->loop_exits[ctxt->curr_stack_size] = exit;
+  ctxt->loop_ks[ctxt->curr_stack_size] = k;
+}
+-}
                  
+pushCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+pushCPS ctxtName fname = 
+  let cond          = iid condParamName
+      formalArgCond = AST.CDecl [AST.CTypeSpec intTy] -- int (*cond)(ctxt *)
+                      [(Just (AST.CDeclr (Just cond) 
+                              [ AST.CPtrDeclr [] N.undefNode
+                              , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                       [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                       N.undefNode], False)
+                                              ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      visitor       = iid visitorParamName
+      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*X)(void (*k)(ctxt*), ctxt*)
+                         [(Just (AST.CDeclr (Just x)
+                                 [ AST.CPtrDeclr [] N.undefNode
+                                 , AST.CFunDeclr (Right ([ AST.CDecl [AST.CTypeSpec voidTy] [(Just (AST.CDeclr (Just k) [AST.CPtrDeclr [] N.undefNode
+                                                                                                                        ,AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode], False)) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+                                                         , AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+                                                         ],False)) [] N.undefNode
+                                 ] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+      formalArgVisitor = formalArgX visitor
+      exit          = iid exitParamName
+      formalArgExit = formalArgX exit
+      k             = iid kParamName      
+      formalArgK = AST.CDecl [AST.CTypeSpec voidTy] -- void (*k)(ctxt *)
+               [(Just (AST.CDeclr (Just k) 
+                       [ AST.CPtrDeclr [] N.undefNode
+                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                N.undefNode], False)
+                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      ctxt          = iid ctxtParamName                 
+      formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "push") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
+     [ AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid currStackSizeName)) .=. (AST.CBinary AST.CAddOp (cvar ctxt .->. (iid currStackSizeName)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_conds")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar cond))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_visitors")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar visitor))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_exits")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar exit))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_ks")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar k))) N.undefNode)
+     ]
+                 
+
+{-     
+void pop(sortctxt *ctxt) {
+  ctxt->curr_stack_size = ctxt->curr_stack_size - 1;
+}
+-}
+     
+popCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+popCPS ctxtName fname = 
+  let ctxt          = iid ctxtParamName                 
+      formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "pop") [formalArgCtxt]
+     [ AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid currStackSizeName)) .=. (AST.CBinary AST.CSubOp (cvar ctxt .->. (iid currStackSizeName)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
+     ]
+
 -- ^ loop_cps 
+{-
+void loop_cps(int (*cond)(sortctxt*),
+	      void (*visitor)(void (*k)(sortctxt*), sortctxt*),
+	      void (*exit)(void (*k)(sortctxt*), sortctxt*),
+	      void (*k)(sortctxt *), sortctxt* ctxt) {
+  
+  if ((*cond)(ctxt)) {
+    (*visitor)(&lambda_loop_cps, ctxt);
+  } else {
+    (*exit)(k,ctxt);
+  }
+}
+
+-}
 loopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
 loopCPS ctxtName fname = 
   let cond          = iid condParamName
@@ -677,8 +774,49 @@ loopCPS ctxtName fname =
                                                                                                              , cvar ctxt ]) N.undefNode) ] N.undefNode))
                        N.undefNode)
      ]
+{-                 
+void lambda_loop_cps(sortctxt* ctxt) {
+  loop_cps(ctxt->loop_conds[ctxt->loop_stack_size],
+	   ctxt->loop_visitors[ctxt->loop_stack_size],
+	   ctxt->loop_exits[ctxt->loop_stack_size],
+	   ctxt->loop_ks[ctxt->loop_stack_size], ctxt);
+}
+-}
+lambdaLoopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+lambdaLoopCPS ctxtName fname = 
+  let ctxt          = iid ctxtParamName                 
+      formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "lambda_loop") [formalArgCtxt] 
+       [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (iid fname `app` iid "loop"))  
+                                          [ ((cvar ctxt) .->. (iid "loop_conds")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))
+                                          , ((cvar ctxt) .->. (iid "loop_visitors")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))
+                                          , ((cvar ctxt) .->. (iid "loop_exits")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))                                            
+                                          , ((cvar ctxt) .->. (iid "loop_ks")) .!!. ((cvar ctxt) .->. (iid currStackSizeName)) 
+                                          , (cvar ctxt)
+                                          ] N.undefNode)) N.undefNode) ]
                  
-                 
+
+{-
+void id(sortctxt *ctxt) { return; }
+
+-}
+
+idCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+idCPS ctxtName fname = 
+  let ctxt          = iid ctxtParamName                 
+      formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "id") [formalArgCtxt]
+     [ AST.CBlockStmt (AST.CReturn Nothing N.undefNode) ]
+     
+
+
+-- ^ generate function signature declaration from function definition
+funSig :: AST.CFunctionDef N.NodeInfo -> AST.CDeclaration N.NodeInfo
+funSig (AST.CFunDef tySpecfs declarator op_decls stmt nodeInfo) = AST.CDecl tySpecfs [(Just declarator, Nothing, Nothing)] N.undefNode
+  
+
 
 -- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
@@ -744,6 +882,8 @@ voidTy = AST.CVoidType N.undefNode
 intTy  = AST.CIntType N.undefNode
 boolTy = intTy
 
+
+-- ^ define a function
 fun :: [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return type
        Ident ->  -- ^ name 
        [AST.CDeclaration N.NodeInfo] -> -- ^ params
@@ -751,7 +891,7 @@ fun :: [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return type
        AST.CFunctionDef N.NodeInfo
 fun tySpec fname params stmts = AST.CFunDef tySpec (AST.CDeclr (Just fname) [AST.CFunDeclr (Right (params,False)) [] N.undefNode] Nothing [] N.undefNode) [] (AST.CCompound [] stmts N.undefNode) N.undefNode
 
-
+-- ^ call a function
 funCall :: AST.CExpression N.NodeInfo -> [AST.CExpression N.NodeInfo] -> AST.CExpression N.NodeInfo
 funCall f args = AST.CCall f args N.undefNode
 
@@ -771,12 +911,12 @@ mkContext name labels formal_arg_decls local_var_decls returnType = -- todo the 
       binaryFuncStack fname = AST.CDecl [AST.CTypeSpec voidTy] 
                               [(Just (AST.CDeclr (Just $ iid fname) [ AST.CArrDeclr [] (AST.CArrSize False (AST.CConst (AST.CIntConst (cInteger stackSize) N.undefNode))) N.undefNode
                                                                     , AST.CPtrDeclr [] N.undefNode
-                                                                    , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CVoidType N.undefNode)] [(Just (AST.CDeclr (Just (iid "k")) [AST.CPtrDeclr [] N.undefNode, AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode, AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode) ,Nothing,Nothing)] N.undefNode
+                                                                    , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CVoidType N.undefNode)] [(Just (AST.CDeclr (Just (iid kParamName)) [AST.CPtrDeclr [] N.undefNode, AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode, AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode) ,Nothing,Nothing)] N.undefNode
       ksStack      = unaryFuncStack "loop_ks"
       condStack    = unaryFuncStack "loop_conds"                                    
       visitorStack = binaryFuncStack "loop_visitors"
       exitStack    = binaryFuncStack "loop_exits"
-      currStackSize = AST.CDecl [AST.CTypeSpec intTy] [(Just (AST.CDeclr (Just $ iid "curr_stack_size") [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+      currStackSize = AST.CDecl [AST.CTypeSpec intTy] [(Just (AST.CDeclr (Just $ iid currStackSizeName) [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
       funcResult    = AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
       decls'        = formal_arg_decls ++ concatMap (\d -> renameDeclWithLabels d labels) local_var_decls ++ [ksStack, condStack, visitorStack, exitStack, currStackSize, funcResult]
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
@@ -796,45 +936,7 @@ renameDeclWithLabel decl label =
     { (decl', rstate') -> decl' }
 
 
-{-
-
-typedef struct FibCtxt {
-  int x_0;
-  int (*cond2)(struct FibCtxt *);
-  void (*visitor3)(void (*k)(struct FibCtxt*), struct FibCtxt*);
-} fibctxt;
 
 
 
-CTranslUnit 
-  [CDeclExt (CDecl  -- type specifier
-             [ CStorageSpec (CTypedef (NodeInfo ("test.c": line 3) (("test.c": line 3),7) (Name {nameId = 0}))) -- typedef
-             , CTypeSpec (CSUType {- struct or union type -} (CStruct  -- typename struct
-                                   CStructTag  -- to indicate that itis a struct not a union but should not CStruct do the job?
-                                   (Just (Ident "FibCtxt" 144044346 (NodeInfo ("test.c": line 3) (("test.c": line 3),7) (Name {nameId = 1}))))  -- structName
-                                   (Just [CDecl 
-                                          [CTypeSpec (CIntType (NodeInfo ("test.c": line 4) (("test.c": line 4),3) (Name {nameId = 3})))] 
-                                          [(Just (CDeclr (Just (Ident "x_0" 798712 (NodeInfo ("test.c": line 4) (("test.c": line 4),3) (Name {nameId = 2})))) [] Nothing [] (NodeInfo ("test.c": line 4) (("test.c": line 4),3) (Name {nameId = 4}))),Nothing,Nothing)] 
-                                          (NodeInfo ("test.c": line 4) (("test.c": line 4),3) (Name {nameId = 5}))
-                                               
-                                         ,CDecl 
-                                          [CTypeSpec (CIntType (NodeInfo ("test.c": line 5) (("test.c": line 5),3) (Name {nameId = 6})))] 
-                                          [(Just (CDeclr (Just (Ident "cond2" 211531797 (NodeInfo ("test.c": line 5) (("test.c": line 5),5) (Name {nameId = 7})))) [CPtrDeclr [] (NodeInfo ("test.c": line 5) (("test.c": line 5),5) (Name {nameId = 9})),CFunDeclr (Right ([CDecl [CTypeSpec (CSUType (CStruct CStructTag (Just (Ident "FibCtxt" 144044346 (NodeInfo ("test.c": line 5) (("test.c": line 5),7) (Name {nameId = 10})))) Nothing [] (NodeInfo ("test.c": line 5) (("test.c": line 5),7) (Name {nameId = 11}))) (NodeInfo ("test.c": line 5) (("test.c": line 5),7) (Name {nameId = 12})))] [(Just (CDeclr Nothing [CPtrDeclr [] (NodeInfo ("test.c": line 5) (("test.c": line 5),1) (Name {nameId = 13}))] Nothing [] (OnlyPos <no file> (<no file>,-1))),Nothing,Nothing)] (NodeInfo ("test.c": line 5) (("test.c": line 5),1) (Name {nameId = 14}))],False)) [] (NodeInfo ("test.c": line 5) (("test.c": line 5),1) (Name {nameId = 15}))] Nothing [] (NodeInfo ("test.c": line 5) (("test.c": line 5),5) (Name {nameId = 8}))),Nothing,Nothing)] 
-                                          (NodeInfo ("test.c": line 5) (("test.c": line 5),1) (Name {nameId = 16}))
-                                               
-                                         ,CDecl 
-                                          [CTypeSpec (CVoidType (NodeInfo ("test.c": line 6) (("test.c": line 6),4) (Name {nameId = 17})))] 
-                                          [(Just (CDeclr (Just (Ident "visitor3" 330935530 (NodeInfo ("test.c": line 6) (("test.c": line 6),8) (Name {nameId = 18})))) [CPtrDeclr [] (NodeInfo ("test.c": line 6) (("test.c": line 6),8) (Name {nameId = 20})),CFunDeclr (Right ([CDecl [CTypeSpec (CVoidType (NodeInfo ("test.c": line 6) (("test.c": line 6),4) (Name {nameId = 21})))] [(Just (CDeclr (Just (Ident "k" 107 (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 22})))) [CPtrDeclr [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 24})),CFunDeclr (Right ([CDecl [CTypeSpec (CSUType (CStruct CStructTag (Just (Ident "FibCtxt" 144044346 (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 25})))) Nothing [] (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 26}))) (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 27})))] [(Just (CDeclr Nothing [CPtrDeclr [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 28}))] Nothing [] (OnlyPos <no file> (<no file>,-1))),Nothing,Nothing)] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 29}))],False)) [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 30}))] Nothing [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 23}))),Nothing,Nothing)] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 31})),CDecl [CTypeSpec (CSUType (CStruct CStructTag (Just (Ident "FibCtxt" 144044346 (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 32})))) Nothing [] (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 33}))) (NodeInfo ("test.c": line 6) (("test.c": line 6),7) (Name {nameId = 34})))] [(Just (CDeclr Nothing [CPtrDeclr [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 35}))] Nothing [] (OnlyPos <no file> (<no file>,-1))),Nothing,Nothing)] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 36}))],False)) [] (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 37}))] Nothing [] (NodeInfo ("test.c": line 6) (("test.c": line 6),8) (Name {nameId = 19}))),Nothing,Nothing)] 
-                                          (NodeInfo ("test.c": line 6) (("test.c": line 6),1) (Name {nameId = 38}))]) 
-                                   [] 
-                                   (NodeInfo ("test.c": line 3) (("test.c": line 7),1) (Name {nameId = 40}))) 
-                          (NodeInfo ("test.c": line 3) (("test.c": line 7),1) (Name {nameId = 41})))
-                   ] 
-             -- mb_declarator,mb_init,mib
-             [(Just (CDeclr (Just (Ident "fibctxt" 211153242 (NodeInfo ("test.c": line 7) (("test.c": line 7),7) (Name {nameId = 39})))) [] Nothing [] (NodeInfo ("test.c": line 7) (("test.c": line 7),7) (Name {nameId = 42}))),Nothing,Nothing)] 
-             (NodeInfo ("test.c": line 3) (("test.c": line 7),1) (Name {nameId = 43})))] 
-  (NodeInfo ("test.c": line 3) (("test.c": line 7),1) (Name {nameId = 44}))
-
-
--}
 
