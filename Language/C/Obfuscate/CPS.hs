@@ -110,6 +110,9 @@ data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main fun
 -- global names                          
 kParamName = "kParam"
 ctxtParamName = "ctxtParam"                          
+condParamName = "condParam"
+visitorParamName = "visitorParam"
+exitParamName = "exitParam"
 
 
 {-
@@ -562,6 +565,8 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       exits    = allExits labelledBlocks
       -- all the conditional function 
       conds    = allLoopConds ctxtName funName labelledBlocks 
+      -- loop_cps and loop_lambda
+      loop_cps = loopCPS ctxtName funName
       -- all the "nested/helper" function declarations
       ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       main_decls = 
@@ -591,7 +596,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
              AST.CFunDef tySpecfs declarator decls (AST.CCompound [] (main_decls ++ main_stmts) N.undefNode) nodeInfo 
         }
-  in CPS main_decls main_stmts (ps ++ conds) context main_func
+  in CPS main_decls main_stmts (ps ++ conds ++ [loop_cps]) context main_func
      
 -- ^ get all visitor labels from te labeledblocks map     
 allVisitors :: SDom -> M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
@@ -621,9 +626,9 @@ loopCond ctxtName fname (l,blk)
   | lb_loop blk =
     let stmts = lb_stmts blk
         conds = [ cps_trans_exp ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
-        paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                    [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-        decls = [ fun [AST.CTypeSpec boolTy] (iid fname `app` iid "cond" `app` l) [paramCtxt] [AST.CBlockStmt (AST.CReturn (Just cond) N.undefNode)]
+        formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                   [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+        decls = [ fun [AST.CTypeSpec boolTy] (iid fname `app` iid "cond" `app` l) [formalArgCtxt] [AST.CBlockStmt (AST.CReturn (Just cond) N.undefNode)]
                 | cond <- conds ]
     in decls
   | otherwise  = [] 
@@ -632,19 +637,46 @@ loopCond ctxtName fname (l,blk)
 -- ^ loop_cps 
 loopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
 loopCPS ctxtName fname = 
-  let paraCond = undefined
-      paraVisitor = undefined
-      paraExit = undefined
-      paraK    = undefined
-      paraCtxt = undefined
-  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop") [paraCond, paraVisitor, paraExit, paraK, paraCtxt] [
-    AST.CBlockStmt (AST.CIf (funCall (ind paraCond) [paraCtxt]) 
-                    (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind paraVisitor) [ adr (cvar (iid fname `app` iid "lambda_loop"))
-                                                                                             , cvar (iid ctxtParamName) ]) N.undefNode ) ] N.undefNode)
-                    (Just (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind paraExit) [ cvar (iid kParamName)
-                                                                                                       , cvar (iid ctxtParamName) ]) N.undefNode) ] N.undefNode))
-                   N.undefNode)
-    ]
+  let cond          = iid condParamName
+      formalArgCond = AST.CDecl [AST.CTypeSpec intTy] -- int (*cond)(ctxt *)
+                      [(Just (AST.CDeclr (Just cond) 
+                              [ AST.CPtrDeclr [] N.undefNode
+                              , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                       [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                       N.undefNode], False)
+                                              ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      visitor       = iid visitorParamName
+      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*X)(void (*k)(ctxt*), ctxt*)
+                         [(Just (AST.CDeclr (Just x)
+                                 [ AST.CPtrDeclr [] N.undefNode
+                                 , AST.CFunDeclr (Right ([ AST.CDecl [AST.CTypeSpec voidTy] [(Just (AST.CDeclr (Just k) [AST.CPtrDeclr [] N.undefNode
+                                                                                                                        ,AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode], False)) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+                                                         , AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+                                                         ],False)) [] N.undefNode
+                                 ] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
+      formalArgVisitor = formalArgX visitor
+      exit          = iid exitParamName
+      formalArgExit = formalArgX exit
+      k             = iid kParamName      
+      formalArgK = AST.CDecl [AST.CTypeSpec voidTy] -- void (*k)(ctxt *)
+               [(Just (AST.CDeclr (Just k) 
+                       [ AST.CPtrDeclr [] N.undefNode
+                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                N.undefNode], False)
+                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      ctxt          = iid ctxtParamName                 
+      formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
+     [
+       AST.CBlockStmt (AST.CIf (funCall (ind (cvar cond)) [(cvar ctxt)]) 
+                       (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind (cvar visitor)) [ adr (cvar (iid fname `app` iid "lambda_loop"))
+                                                                                                       , cvar ctxt ]) N.undefNode ) ] N.undefNode)
+                       (Just (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind (cvar exit)) [ cvar k
+                                                                                                             , cvar ctxt ]) N.undefNode) ] N.undefNode))
+                       N.undefNode)
+     ]
                  
                  
 
