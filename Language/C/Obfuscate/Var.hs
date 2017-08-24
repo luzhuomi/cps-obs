@@ -8,6 +8,8 @@ module Language.C.Obfuscate.Var where
 import Control.Monad.State as MS
 import qualified Data.Map as M
 
+import System.IO.Unsafe (unsafePerformIO)
+
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -323,7 +325,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CCond e1' mb_e2' e3' nodeInfo)
     }
   rename (AST.CBinary op e1 e2 nodeInfo) = do 
-    { e1' <- rename e1
+    { st <- get
+    ; e1' <- rename e1
     ; e2' <- rename e2
     ; return (AST.CBinary op e1' e2' nodeInfo)
     }

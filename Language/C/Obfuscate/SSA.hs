@@ -305,7 +305,7 @@ modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) 
           
 
 data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
-                                  , [(Ident, Ident)])] -- ^ incoming block x renamed variables
+                                  , [(Ident, Maybe Ident)])] -- ^ incoming block x last_defined block (it is maybe because it could be formal arg)
                        , lb_stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , lb_preds :: [NodeId]
                        , lb_succs :: [NodeId]
@@ -345,6 +345,14 @@ data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function w
 (Loop Envs) \delta = (l_if, e, l_t, l_f)
 -}
 
+{-
+prettyLB :: LabeledBlock -> String
+prettyLB lb = "LB {" ++ "phis:" ++ (show (phis lb)) ++ ", stmts:" ++ (show (lb_stmts lb)) ++ "}"
+
+prettySSA :: SSA -> String
+prettySSA ssa = "scope_decls :" ++ (render $ pretty (scoped_decls ssa)) ++ "\n" ++
+                "labelled_blocks :" ++ (concatMap (\(label, lb) ->  (render $ pretty label) ++ ":" ++ (prettyLB lb) ++ ",\n") (M.toList $ labelled_blocks ssa))
+-}
 
 buildSSA :: CFG -> SSA
 buildSSA cfg = 
@@ -371,20 +379,21 @@ buildSSA cfg =
           -- given a node's label (as the starting point of the search)
           -- a variable (which is not yet renamed), the dom tree
           -- to find the label of the node which contains preceding definition of the variable 
-          precDef :: Ident -> Ident -> DTree -> CFG -> Ident
+          precDef :: Ident -> Ident -> DTree -> CFG -> Maybe Ident
           precDef currLbl var dt cfg = 
             case M.lookup currLbl phiLocMap of
-              { Just vs | var `elem` vs -> currLbl  -- the var is reassigned through a phi function in the current block
-              ; _                       ->          -- the var could be reassigned locally
+              { Just vs | var `elem` vs -> Just currLbl  -- the var is reassigned through a phi function in the current block
+              ; _                       ->               -- the var could be reassigned locally
                    case M.lookup currLbl cfg of
                      { Nothing   -> error $ "Fatal: Label " ++ show currLbl ++ " is not found in the CFG"
-                     ; Just node | var `elem` (lhsVars node) ->  currLbl
+                     ; Just node | var `elem` (lhsVars node) ->  Just currLbl
                      ; Just _ | otherwise -> 
                        case parentOf currLbl dt of 
                          { Nothing -> -- no parent: this could be due to a nested scope var in some inner block of if else or while. 
                               -- we will move it to block 0 (the init block) 
                               -- e.g. refer to the fibiter.c, the variable t
-                              currLbl
+                              -- Nothing 
+                              Just currLbl
                          ; Just parentLbl -> precDef parentLbl var dt cfg
                          }
                      }
@@ -397,14 +406,14 @@ buildSSA cfg =
           eachNode ssa (currLbl, node) = case node of 
             { Node statements lvars rvars local_decls precLbls succLbls isloop -> 
                  let phis_ :: [( Ident -- ^ var being redefined (not yet renamed)
-                              , [(Ident, Ident)])] -- ^ (incoming block lbl, lbl of preceding blk in which var is redefined)
+                              , [(Ident, Maybe Ident)])] -- ^ (incoming block lbl, lbl of preceding blk in which var is redefined)
                      phis_ = case M.lookup currLbl phiLocMap of 
                        { Nothing      -> []
                        ; Just phiVars -> map (\v -> 
                                                let lastDefs = 
                                                      map (\precLbl -> 
-                                                           let lblVarDefined =  precDef precLbl v dtree cfg
-                                                           in (precLbl, lblVarDefined)) precLbls
+                                                           let mb_lblVarDefined =  precDef precLbl v dtree cfg
+                                                           in (precLbl, mb_lblVarDefined)) precLbls
                                                in (v, lastDefs)
                                                   -- find the preceding node and the renamed variable
                                              ) [ v |  v <- phiVars, not (v `elem` local_decls) ]
@@ -416,12 +425,21 @@ buildSSA cfg =
                                    rnEnvLocal = M.fromList $  map (\var -> (var, var `app` currLbl)) local_decls
                                    rvarsNotLocal = filter (\var -> not (var `M.member` rnEnvLocal)) rvars
                                    rnEnv = case precLbls of  
-                                     { [] -> -- entry block 
-                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvarsNotLocal)
+                                     { [] -> -- entry block -- todo: check, shouldn't be the formal arg?
+                                          M.fromList (map (\var -> (var, var {- var `app` currLbl-})) rvarsNotLocal)
                                      ; [precLbl] -> -- non-phi block
-                                          M.fromList (map (\var -> (var, var `app` (precDef precLbl var dtree cfg))) rvarsNotLocal)
+                                            M.fromList (map (\var -> 
+                                                              case precDef precLbl var dtree cfg of 
+                                                                { Just def_lbl -> (var, var `app` def_lbl)
+                                                                ; Nothing      -> -- it is a formal arg
+                                                                     (var,var)
+                                                                }) rvarsNotLocal)
                                      ; _ -> -- phi block
-                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvarsNotLocal)
+                                          M.fromList (map (\var -> case lookup var phis_ of 
+                                                              { Just _ -> (var, var `app` currLbl)
+                                                              ; Nothing -> -- not in phi, it's a formal arg
+                                                                   (var, var)
+                                                              }) rvarsNotLocal)
                                      }
                                in RSt currLbl (rnEnvLocal `M.union` rnEnv) []
                              

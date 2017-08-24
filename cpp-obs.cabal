@@ -1,0 +1,34 @@
+Name:                   cpp-obs
+Version:                0.0.1
+License:                Apache
+License-File:           LICENSE
+Copyright:              Copyright (c) 2017, Kenny Zhuo Ming Lu
+Author:                 Kenny Zhuo Ming Lu 
+Maintainer:             luzhuomi@gmail.com
+Stability:              Beta
+Homepage:               
+Synopsis:               C/C++ code obfuscator using SSA and CPS
+Description:            C/C++ code obfuscator using SSA and CPS
+Category:               Language
+Tested-With:            GHC
+Build-Type:             Simple
+Cabal-Version:          >= 1.2.3
+
+flag base4
+
+library 
+  Build-Depends:        language-c, base, mtl, containers, pretty > 1.0
+  Exposed-Modules:       Language.C.Obfuscate.Var
+                         Language.C.Obfuscate.CFG 
+                         Language.C.Obfuscate.SSA
+                         Language.C.Obfuscate.CPS
+                         
+  Buildable:              True
+  Extensions:             GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
+  GHC-Options:            
+  GHC-Prof-Options:       -auto-all
+
+
+executable cpp-obs
+  main-is:             Main.hs
+  -- hs-source-dirs:      src

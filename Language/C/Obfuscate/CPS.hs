@@ -43,10 +43,10 @@ testCPS = do
                 ; putStrLn $ show $ exits                  
 
                 ; let cps = ssa2cps fundef (buildSSA (cfg state))
-                ; -- putStrLn $ show $ cps
-                ; putStrLn $ render $ pretty (cps_ctxt cps)
-                ; mapM_  (\d -> putStrLn $ render $ pretty d) (cps_funcsigs cps)
-                ; mapM_  (\f -> putStrLn $ render $ pretty f) ((cps_funcs cps) ++ [cps_main cps])
+                ; putStrLn $ prettyCPS $ cps
+                ; -- putStrLn $ render $ pretty (cps_ctxt cps)
+                ; -- mapM_  (\d -> putStrLn $ render $ pretty d) (cps_funcsigs cps)
+                ; -- mapM_  (\f -> putStrLn $ render $ pretty f) ((cps_funcs cps) ++ [cps_main cps])
 
                 }
            ; CFGError s       -> error s
@@ -54,6 +54,13 @@ testCPS = do
     ; _ -> error "not fundec"
     }
   }
+
+prettyCPS :: CPS -> String 
+prettyCPS cps = 
+  let declExts = map (\d -> AST.CDeclExt d) ([(cps_ctxt cps)] ++ (cps_funcsigs cps))
+      funDeclExts = map (\f -> AST.CFDefExt f) ((cps_funcs cps) ++ [cps_main cps])
+  in render $ pretty (AST.CTranslUnit (declExts ++ funDeclExts) N.undefNode)
+
 
 
 {- Source Language SSA
@@ -427,6 +434,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
                      , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
                      , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
                      , (cvar (iid ctxtParamName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , cvar (iid ctxtParamName)
                      ]
                  
         call_loop = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar loop) loop_args N.undefNode)) N.undefNode)
@@ -467,7 +475,7 @@ cps_trans_phis ::  ContextName ->
                    Ident -> -- ^ source block label (where goto is invoked)
                    Ident -> -- ^ destination block label (where goto is jumping to)
                    [( Ident -- ^ var being redefined 
-                    , [(Ident, Ident)])] ->  -- ^ incoming block x renamed variables
+                    , [(Ident, Maybe Ident)])] ->  -- ^ incoming block x renamed variables
                    [AST.CCompoundBlockItem N.NodeInfo]
 cps_trans_phis ctxtName src_lb dest_lb ps = map (cps_trans_phi ctxtName src_lb dest_lb) ps
 
@@ -484,14 +492,17 @@ l_s, l_d |- \bar{i} => \bar{x = e}
 cps_trans_phi :: ContextName -> 
                  Ident -> -- ^ source block label (where goto is invoked)
                  Ident -> -- ^ destination block label (where goto is jumping to)
-                 (Ident, [(Ident, Ident)]) -> 
+                 (Ident, [(Ident, Maybe Ident)]) -> 
                  AST.CCompoundBlockItem N.NodeInfo
 cps_trans_phi ctxtName src_lb dest_lb (var, pairs) = 
   case lookup src_lb pairs of -- look for the matching label according to the source label
     { Nothing           -> error "cps_trans_phi failed: can't find the source label from the incoming block labels."
     ; Just redefined_lb -> -- lbl in which the var is redefined (it could be the precedence of src_lb)
       let lhs = (cvar (iid ctxtParamName)) .->. (var `app` dest_lb)
-          rhs = (cvar (iid ctxtParamName)) .->. (var `app` redefined_lb)
+          rhs = (cvar (iid ctxtParamName)) .->. case redefined_lb of  
+            { Just l -> (var `app` l)
+            ; Nothing -> var 
+            }
       in AST.CBlockStmt (AST.CExpr (Just (lhs .=. rhs)) N.undefNode) -- todo check var has been renamed with label
     }
 
@@ -584,7 +595,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
         [ AST.CBlockDecl (AST.CDecl 
                           [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] 
-                          [(Just (AST.CDeclr (Just (iid "ctxt")) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),
+                          [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),
                             Just (AST.CInitExpr 
                                   (AST.CCast (AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] 
                                               [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode) 
@@ -594,13 +605,12 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg 
-        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | 
-          arg <- formalArgIds
-        ] ++ [
-          AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | arg <- formalArgIds] ++ 
+        [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
                                            [ AST.CUnary AST.CAdrOp (AST.CVar ((iid funName) `app` (iid "id")) N.undefNode) N.undefNode
-                                           , AST.CVar (iid "ctxt") N.undefNode ] N.undefNode)) N.undefNode)
-          ]
+                                           , AST.CVar (iid ctxtParamName) N.undefNode ] N.undefNode)) N.undefNode)
+        , AST.CBlockStmt (AST.CReturn (Just $ (cvar (iid ctxtParamName)) .->. (iid "func_result")) N.undefNode)
+        ]
         
       main_func = case fundef of 
         { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
@@ -902,7 +912,7 @@ mkContext name labels formal_arg_decls local_var_decls returnType = -- todo the 
       ctxtAlias   = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs       = []
       stackSize   = 20
-      unaryFuncStack fname = AST.CDecl [AST.CTypeSpec voidTy] -- void (*loop_ks[2])(struct FuncCtxt*);
+      unaryFuncStack ty fname = AST.CDecl [AST.CTypeSpec ty] -- void (*loop_ks[2])(struct FuncCtxt*);
                              -- todo : these are horrible to read, can be simplified via some combinators
                              
                     [(Just (AST.CDeclr (Just $ iid fname) [ AST.CArrDeclr [] (AST.CArrSize False (AST.CConst (AST.CIntConst (cInteger stackSize) N.undefNode))) N.undefNode
@@ -912,8 +922,8 @@ mkContext name labels formal_arg_decls local_var_decls returnType = -- todo the 
                               [(Just (AST.CDeclr (Just $ iid fname) [ AST.CArrDeclr [] (AST.CArrSize False (AST.CConst (AST.CIntConst (cInteger stackSize) N.undefNode))) N.undefNode
                                                                     , AST.CPtrDeclr [] N.undefNode
                                                                     , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CVoidType N.undefNode)] [(Just (AST.CDeclr (Just (iid kParamName)) [AST.CPtrDeclr [] N.undefNode, AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode, AST.CDecl [AST.CTypeSpec (AST.CSUType (AST.CStruct AST.CStructTag (Just structName) Nothing [] N.undefNode) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode],False)) [] N.undefNode] Nothing [] N.undefNode) ,Nothing,Nothing)] N.undefNode
-      ksStack      = unaryFuncStack "loop_ks"
-      condStack    = unaryFuncStack "loop_conds"                                    
+      ksStack      = unaryFuncStack voidTy "loop_ks"
+      condStack    = unaryFuncStack intTy "loop_conds"                                    
       visitorStack = binaryFuncStack "loop_visitors"
       exitStack    = binaryFuncStack "loop_exits"
       currStackSize = AST.CDecl [AST.CTypeSpec intTy] [(Just (AST.CDeclr (Just $ iid currStackSizeName) [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
