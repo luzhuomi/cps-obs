@@ -628,10 +628,31 @@ getVarFromExp = getRHSVarFromExp
 
 -- ^ get all variable from an expression, split them into lval and rval variables
 getVarsFromExp :: AST.CExpression a -> ([Ident], [Ident])
-getVarsFromExp (AST.CAssign op lhs rhs _)    =  
-  let (lvars1, rvars1) = getVarsFromExp lhs
-      (lvars2, rvars2) = getVarsFromExp rhs
+getVarsFromExp (AST.CAssign op e1 e2 _) =  
+  let (lvars1, rvars1) = getVarsFromExp e1
+      (lvars2, rvars2) = getVarsFromExp e2
   in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+getVarsFromExp (AST.CComma exps _)        = 
+  case unzip (map getVarsFromExp exps) of 
+    { (ll, rr) -> (concat ll, concat rr) }
+getVarsFromExp (AST.CCond e1 Nothing e3 _) =   
+  let (lvars1, rvars1) = getVarsFromExp e1
+      (lvars2, rvars2) = getVarsFromExp e3
+  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+getVarsFromExp (AST.CCond e1 (Just e2) e3 _) =   
+  let (lvars1, rvars1) = getVarsFromExp e1
+      (lvars2, rvars2) = getVarsFromExp e2
+      (lvars3, rvars3) = getVarsFromExp e3
+  in (lvars1 ++ lvars2 ++ lvars3, rvars1 ++ rvars2 ++ rvars3)
+getVarsFromExp (AST.CBinary op e1 e2 _) =
+  let (lvars1, rvars1) = getVarsFromExp e1
+      (lvars2, rvars2) = getVarsFromExp e2
+  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+getVarsFromExp (AST.CCast op e1 e2 _) =
+  let (lvars1, rvars1) = getVarsFromExp e1
+      (lvars2, rvars2) = getVarsFromExp e2
+  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+  
 getVarsFromExp e = undefined     
 
 -- ^ insert goto statement according to the succ 
