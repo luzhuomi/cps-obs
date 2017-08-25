@@ -451,7 +451,7 @@ buildSSA cfg =
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
-          ssa =  foldl eachNode (SSA [] M.empty sdom) $ M.toList cfg
+          ssa = foldl eachNode (SSA [] M.empty sdom) $ M.toList cfg
       in ssa   -- the scoped_decls were not yet renamed.
     }
 

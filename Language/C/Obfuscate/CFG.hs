@@ -26,7 +26,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/sort.c" -- "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts {- "test/sort.c" -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -201,10 +201,9 @@ CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {x = 
 CFG, max, preds, false |- x = exp => CFG1, max1, [], false 
 -}
   
-  buildCFG (AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1)) nodeInfo) = do  -- todo : what about lhs += rhs
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign op lval rval nodeInfo1)) nodeInfo) = do  -- todo : what about lhs += rhs
     { st <- get
-    ; let lhs      = getLHSVarFromExp lval
-          rhs      = getRHSVarFromExp rval
+    ; let (lhs,rhs)= getVarsFromExp exp
           cfg0     = cfg st
           preds0   = currPreds st
           lhsPreds = S.fromList $ concatMap (\pred -> case (M.lookup pred cfg0) of 
@@ -238,12 +237,12 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
   buildCFG (AST.CExpr (Just exp) nodeInfo) =  do  
     { st <- get
     ; let cfg0     = cfg st
-          rhs      = getRHSVarFromExp exp
+          (lhs,rhs) = getVarsFromExp exp
           preds0   = currPreds st
           s        = AST.CBlockStmt $ AST.CExpr (Just exp) nodeInfo
     ; if (continuable st)
       then 
-        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
+        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lVars=(lVars n)++lhs, rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
         in do { put st{cfg = cfg1, continuable = True} }   
 
       else 
@@ -286,7 +285,7 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
            { st <- get 
            ; let max        = currId st
                  currNodeId = internalIdent (labPref++show max)          
-                 rhs        = getRHSVarFromExp exp
+                 (lhs,rhs)  = getVarsFromExp exp
                  max1       = max + 1
                  cfg0       = cfg st 
                  preds0     = currPreds st
@@ -294,7 +293,7 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
                  -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
                  -- we can give an empty statement to the new CFG node in CFG1 first and update it
                  -- after we have max2,
-                 cfgNode    = Node [] [] rhs [] preds0 [] False
+                 cfgNode    = Node [] lhs rhs [] preds0 [] False
                  cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
                  cfg1       = M.insert currNodeId cfgNode cfg1'
                               
@@ -340,7 +339,7 @@ CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
     { st <- get 
     ; let max        = currId st
           currNodeId = internalIdent (labPref++show max)          
-          rhs        = getRHSVarFromExp exp          
+          (lhs,rhs)  = getVarsFromExp exp          
           max1       = max + 1
           cfg0       = cfg st 
           preds0     = currPreds st
@@ -348,7 +347,7 @@ CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
           -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
           -- we can give an empty statement to the new CFG node in CFG1 first and update it
           -- after we have max2,
-          cfgNode    = Node [] [] rhs [] preds0 [] True
+          cfgNode    = Node [] lhs rhs [] preds0 [] True
           cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
           cfg1       = M.insert currNodeId cfgNode cfg1'
     ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
@@ -467,21 +466,21 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
     ; if (continuable st) 
       then  
         let cfg0       = cfg st 
-            rhs        = case mb_expression of { Just exp -> getRHSVarFromExp exp ; Nothing -> [] }
+            (lhs,rhs)  = case mb_expression of { Just exp -> getVarsFromExp exp ; Nothing -> ([],[]) }
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CReturn mb_expression modeInfo
-            cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
+            cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lVars = (lVars n) ++ lhs, rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
         in do 
           { put st{cfg = cfg1, currPreds=[], continuable = False} }        
       else 
         let max        = currId st
             currNodeId = internalIdent (labPref++show max)          
-            rhs        = case mb_expression of { Just exp -> getRHSVarFromExp exp ; Nothing -> [] }            
+            (lhs,rhs)  = case mb_expression of { Just exp -> getVarsFromExp exp ; Nothing -> ([],[]) }
             max1       = max + 1
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt  $ AST.CReturn mb_expression modeInfo
-            cfgNode    = Node [s] [] rhs [] preds0 [] False
+            cfgNode    = Node [s] lhs rhs [] preds0 [] False
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -517,7 +516,7 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
         let cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockDecl (AST.CDecl specs divs nodeInfo) 
-            lvars      = getLHSVarsFromDecl divs
+            lvars      = getLHSVarsFromDecl divs -- todo
             rvars      = getRHSVarsFromDecl divs
             cfg1       = foldl (\g pred -> 
                                  M.update (\n -> Just n{ stmts=(stmts n) ++ [ s ]
@@ -575,28 +574,40 @@ getRHSVarsFromDecl :: [(Maybe (AST.CDeclarator a),  -- declarator (may be omitte
 getRHSVarsFromDecl divs = 
   concatMap (\(mb_dec, mb_init, mb_ce) -> 
               case mb_init of
-                { Just init -> getVarFromInit init 
+                { Just init -> getVarsFromInit init 
                 ; Nothing   -> []
                 }
             ) divs
                   
-getVarFromInit (AST.CInitExpr exp _) = getVarFromExp exp 
-getVarFromInit (AST.CInitList ps _ ) =  concatMap (\(partDesignators, init) -> (concatMap getVarFromPartDesignator partDesignators ++ getVarFromInit init)) ps
 
-getVarFromPartDesignator (AST.CArrDesig exp _ ) = getVarFromExp exp
-getVarFromPartDesignator (AST.CMemberDesig id _ ) = [id]
-getVarFromPartDesignator (AST.CRangeDesig exp1 exp2 _ ) = getVarFromExp exp1 ++ getVarFromExp exp2
+getVarsFromInit (AST.CInitExpr exp _) = let vs = getVarsFromExp exp 
+                                        in fst vs ++ snd vs
+getVarsFromInit (AST.CInitList ps _ ) = concatMap (\(partDesignators, init) -> (concatMap getVarsFromPartDesignator partDesignators ++ getVarsFromInit init)) ps
+
+getVarsFromPartDesignator (AST.CArrDesig exp _ ) = let vs = getVarsFromExp exp 
+                                                   in fst vs ++ snd vs
+getVarsFromPartDesignator (AST.CMemberDesig id _ ) = [id]
+getVarsFromPartDesignator (AST.CRangeDesig exp1 exp2 _ ) = 
+  let (lvars1, rvars1) = getVarsFromExp exp1
+      (lvars2, rvars2) = getVarsFromExp exp2
+  in (lvars1 ++ lvars2 ++ rvars1 ++ rvars2)
 
 
 getLHSVarFromExp :: AST.CExpression a -> [Ident]
+getLHSVarFromExp = fst . getVarsFromExp
+
+{-
 getLHSVarFromExp (AST.CComma exps _)          = concatMap getLHSVarFromExp exps -- todo: fix me
 getLHSVarFromExp (AST.CAssign op lval rval _) = getLHSVarFromExp lval
 getLHSVarFromExp (AST.CVar ident _)           = [ident]
 getLHSVarFromExp (AST.CIndex arr idx _ )      = getLHSVarFromExp arr
 getLHSVarFromExp _                            = [] -- todo to check whether we miss any other cases
-
+-}
 
 getRHSVarFromExp :: AST.CExpression a -> [Ident]
+getRHSVarFromExp = snd . getVarsFromExp
+
+{-
 getRHSVarFromExp (AST.CAssign op lval rval _)  = getRHSVarFromExp rval
 getRHSVarFromExp (AST.CComma exps _)           = concatMap getRHSVarFromExp exps 
 getRHSVarFromExp (AST.CCond e1 Nothing e3 _)   = getRHSVarFromExp e1 ++ getRHSVarFromExp e3 
@@ -621,39 +632,73 @@ getRHSVarFromExp (AST.CStatExpr stmt _ )       = [] -- todo GNU C compount state
 getRHSVarFromExp (AST.CLabAddrExpr ident _ )   = [] 
 getRHSVarFromExp (AST.CBuiltinExpr builtin )   = [] -- todo build in expression
 
+-}
+-- getVarFromExp :: AST.CExpression a -> [Ident]
+-- getVarFromExp = getRHSVarFromExp
 
-getVarFromExp :: AST.CExpression a -> [Ident]
-getVarFromExp = getRHSVarFromExp
+getVarsFromLHS :: AST.CExpression a -> ([Ident], [Ident])
+getVarsFromLHS (AST.CVar ident _) = ([ident], [])
+getVarsFromLHS (AST.CIndex arr idx _) = 
+  let (lvars1, rvars1) = getVarsFromLHS arr
+      (lvars2, rvars2) = getVarsFromExp idx -- correct!
+  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+getVarsFromLHS (AST.CMember strt mem _ _) = getVarsFromLHS strt
+getVarsFromLHS e = getVarsFromExp e
+  
 
+(+*+) a b = S.toList (S.fromList (a ++ b))
 
 -- ^ get all variable from an expression, split them into lval and rval variables
 getVarsFromExp :: AST.CExpression a -> ([Ident], [Ident])
-getVarsFromExp (AST.CAssign op e1 e2 _) =  
-  let (lvars1, rvars1) = getVarsFromExp e1
+getVarsFromExp (AST.CAssign AST.CAssignOp e1 e2 _) =  
+  let (lvars1, rvars1) = getVarsFromLHS e1
       (lvars2, rvars2) = getVarsFromExp e2
-  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+  in (lvars1 +*+ lvars2, rvars1 +*+ rvars2)
+getVarsFromExp (AST.CAssign others_op e1 e2 _) =  -- +=, -= ...
+  let (lvars1, rvars1) = getVarsFromLHS e1
+      (lvars2, rvars2) = getVarsFromExp e2
+      (lvars3, rvars3) = getVarsFromExp e1      
+  in (lvars1 +*+ lvars2 +*+ lvars3, rvars1 +*+ rvars2 +*+ rvars3)
 getVarsFromExp (AST.CComma exps _)        = 
   case unzip (map getVarsFromExp exps) of 
     { (ll, rr) -> (concat ll, concat rr) }
 getVarsFromExp (AST.CCond e1 Nothing e3 _) =   
   let (lvars1, rvars1) = getVarsFromExp e1
       (lvars2, rvars2) = getVarsFromExp e3
-  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+  in (lvars1 +*+ lvars2, rvars1 +*+ rvars2)
 getVarsFromExp (AST.CCond e1 (Just e2) e3 _) =   
   let (lvars1, rvars1) = getVarsFromExp e1
       (lvars2, rvars2) = getVarsFromExp e2
       (lvars3, rvars3) = getVarsFromExp e3
-  in (lvars1 ++ lvars2 ++ lvars3, rvars1 ++ rvars2 ++ rvars3)
+  in (lvars1 +*+ lvars2 +*+ lvars3, rvars1 +*+ rvars2 +*+ rvars3)
 getVarsFromExp (AST.CBinary op e1 e2 _) =
   let (lvars1, rvars1) = getVarsFromExp e1
       (lvars2, rvars2) = getVarsFromExp e2
-  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
-getVarsFromExp (AST.CCast op e1 e2 _) =
-  let (lvars1, rvars1) = getVarsFromExp e1
-      (lvars2, rvars2) = getVarsFromExp e2
-  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
-  
-getVarsFromExp e = undefined     
+  in (lvars1 +*+ lvars2, rvars1 +*+ rvars2)
+getVarsFromExp (AST.CCast decl e _)     = getVarsFromExp e
+getVarsFromExp (AST.CUnary op e _)       = getVarsFromExp e
+getVarsFromExp (AST.CSizeofExpr e _)     = getVarsFromExp e
+getVarsFromExp (AST.CSizeofType decl _)  = ([],[])
+getVarsFromExp (AST.CAlignofExpr e _ )   = getVarsFromExp e
+getVarsFromExp (AST.CAlignofType decl _) = ([],[])
+getVarsFromExp (AST.CComplexReal e _)    = getVarsFromExp e
+getVarsFromExp (AST.CComplexImag e _)    = getVarsFromExp e
+getVarsFromExp (AST.CIndex arr idx _ )   = 
+  let (lvars1, rvars1) = getVarsFromExp arr
+      (lvars2, rvars2) = getVarsFromExp idx
+  in (lvars1 +*+ lvars2, rvars1 +*+ rvars2)
+getVarsFromExp (AST.CCall f args _ ) = 
+  let (lvars, rvars) = getVarsFromExp f
+  in case unzip (map getVarsFromExp args) of     
+    { (ll, rr) -> (concat ll +*+ lvars, concat rr +*+ rvars) }
+getVarsFromExp (AST.CMember e ident _ _) = getVarsFromExp e     
+getVarsFromExp (AST.CVar ident _)        = ([],[ident])
+getVarsFromExp (AST.CConst c)            = ([],[])
+getVarsFromExp (AST.CCompoundLit decl initList _ ) = ([], []) -- todo
+getVarsFromExp (AST.CStatExpr stmt _ )       = ([],[]) -- todo GNU C compount statement as expr
+getVarsFromExp (AST.CLabAddrExpr ident _ )   = ([],[]) 
+getVarsFromExp (AST.CBuiltinExpr builtin )   = ([],[]) -- todo build in expression     
+
 
 -- ^ insert goto statement according to the succ 
 -- ^ 1. skipping if statement
