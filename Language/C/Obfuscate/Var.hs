@@ -15,6 +15,13 @@ import qualified Language.C.Data.Node as N
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
+-- import for testing
+import Language.C (parseCFile, parseCFilePre)
+import Language.C.System.GCC (newGCC)
+import Language.C.Pretty (pretty)
+import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
+
+
 -- ^ top level function
 -- rename variables in block items and generate function scope declarations
 renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo])
@@ -366,9 +373,9 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; args' <- rename args
     ; return (AST.CCall f' args' nodeInfo)
     }
-  rename (AST.CMember e ident isDeRef nodeInfo) = do 
+  rename (AST.CMember e i isDeRef nodeInfo) = do 
     { e' <- rename e
-    ; return (AST.CMember e' ident isDeRef nodeInfo) 
+    ; return (AST.CMember e' i isDeRef nodeInfo) 
     }
   rename (AST.CVar ident nodeInfo) = do 
     { ident' <- rename ident
@@ -402,9 +409,14 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     { ident' <- update ident
     ; return (AST.CVar ident' nodeInfo)
     }
+  update (AST.CIndex e i nodeInfo) = do 
+    { e' <- update e
+    ; i' <- rename i -- i is not updated. 
+    ; return (AST.CIndex e' i' nodeInfo)
+    }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
-  update exp = error "can't update expression"
+  update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp)
   
   
                                  

@@ -301,7 +301,7 @@ phiLoc var cfg dft =
                      
 -- ^ retrieve the blocks from a CFG where a variable is being modified.
 modLoc :: Ident -> CFG -> [Ident]                      
-modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lhsVars node)) (M.toList cfg))
+modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lVars node)) (M.toList cfg))
           
 
 data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
@@ -386,7 +386,7 @@ buildSSA cfg =
               ; _                       ->               -- the var could be reassigned locally
                    case M.lookup currLbl cfg of
                      { Nothing   -> error $ "Fatal: Label " ++ show currLbl ++ " is not found in the CFG"
-                     ; Just node | var `elem` (lhsVars node) ->  Just currLbl
+                     ; Just node | var `elem` (lVars node) ->  Just currLbl
                      ; Just _ | otherwise -> 
                        case parentOf currLbl dt of 
                          { Nothing -> -- no parent: this could be due to a nested scope var in some inner block of if else or while. 
@@ -421,7 +421,7 @@ buildSSA cfg =
                      -- build the renaming state from the rhs vars with the precDef
                      -- or from phis_
                      rnState :: RenameState
-                     rnState = let -- todo, the local_decls should be filtered away from the rhsVars and local_decls should be appended with the current node label
+                     rnState = let -- todo, the local_decls should be filtered away from the rVars and local_decls should be appended with the current node label
                                    rnEnvLocal = M.fromList $  map (\var -> (var, var `app` currLbl)) local_decls
                                    rvarsNotLocal = filter (\var -> not (var `M.member` rnEnvLocal)) rvars
                                    rnEnv = case precLbls of  
@@ -463,5 +463,5 @@ buildSSA cfg =
 
 
 allVars :: CFG -> [Ident]
-allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lhsVars n) (M.toList cfg)))
+allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lVars n) (M.toList cfg)))
   

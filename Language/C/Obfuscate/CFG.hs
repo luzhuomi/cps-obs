@@ -26,7 +26,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/sort.c" -- "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -57,8 +57,8 @@ lookupCFG id cfg = M.lookup id cfg
 
                           
 data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
-                 , lhsVars :: [Ident] -- ^ all the variables appearing on the LHS of the assignment stmts
-                 , rhsVars :: [Ident] -- ^ all the variables appearing on the RHS of the assignment stmts
+                 , lVars :: [Ident] -- ^ all the lval variables, e.g. x in x = y; x in x[i] = y
+                 , rVars :: [Ident] -- ^ all the rval variables, e.g. y in x = y; i and y in x[i] = y
                  , localDecls :: [Ident] -- ^ all the variables that are declared locally in this node.
                  , preds   :: [NodeId]
                  , succs   :: [NodeId]
@@ -69,7 +69,7 @@ data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compoun
 instance Show Node where
   show (Node stmts lhs rhs local_decls preds succs loop) = 
     "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " 
-    ++ (show succs) ++  "\n lhsVars: " ++ (show lhs) ++ "\n rhsVars: " ++ (show rhs) ++  "\n localDecls: " ++ (show local_decls) ++ ")\n"
+    ++ (show succs) ++  "\n lVars: " ++ (show lhs) ++ "\n rVars: " ++ (show rhs) ++  "\n localDecls: " ++ (show local_decls) ++ ")\n"
 
 type NodeId = Ident
 
@@ -190,8 +190,8 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
   buildCFG (AST.CDefault stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " default case stmt not supported."
 {-
-CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lhsVars = lhsVars ++ [x] } }  
-x \not in {v | v \in lhsVars pred, pred \in preds }
+CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lVars = lVars ++ [x] } }  
+x \not in {v | v \in lVars pred, pred \in preds }
 --------------------------------------------------------
 CFG, max, preds, true |-  x = exp => CFG1, max, [] , true 
 
@@ -208,13 +208,13 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
           cfg0     = cfg st
           preds0   = currPreds st
           lhsPreds = S.fromList $ concatMap (\pred -> case (M.lookup pred cfg0) of 
-                                                { Just n -> lhsVars n 
+                                                { Just n -> lVars n 
                                                 ; Nothing -> [] 
                                                 }) preds0
           s        = AST.CBlockStmt $ AST.CExpr (Just (AST.CAssign op lval rval nodeInfo1) ) nodeInfo
     ; if (continuable st && not (any (\x -> x `S.member` lhsPreds) lhs))
       then 
-        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lhsVars=(lhsVars n)++lhs, rhsVars=(rhsVars n)++rhs}) pred g) cfg0 preds0
+        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lVars=(lVars n)++lhs, rVars=(rVars n)++rhs}) pred g) cfg0 preds0
         in do { put st{cfg = cfg1, continuable = True} }   
 
       else 
@@ -243,7 +243,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
           s        = AST.CBlockStmt $ AST.CExpr (Just exp) nodeInfo
     ; if (continuable st)
       then 
-        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rhsVars = (rhsVars n) ++ rhs}) pred g) cfg0 preds0
+        let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
         in do { put st{cfg = cfg1, continuable = True} }   
 
       else 
@@ -470,7 +470,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
             rhs        = case mb_expression of { Just exp -> getRHSVarFromExp exp ; Nothing -> [] }
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CReturn mb_expression modeInfo
-            cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rhsVars = (rhsVars n) ++ rhs}) pred g) cfg0 preds0
+            cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
         in do 
           { put st{cfg = cfg1, currPreds=[], continuable = False} }        
       else 
@@ -500,7 +500,7 @@ instance CProg (AST.CCompoundBlockItem N.NodeInfo) where
   
 instance CProg (AST.CDeclaration N.NodeInfo) where
 {-
-CFG1 = CFG \update { pred : {stmts = stmts ++ [ty x = exp[]], lhsVars = lhsVars ++ [x] } } 
+CFG1 = CFG \update { pred : {stmts = stmts ++ [ty x = exp[]], lVars = lVars ++ [x] } } 
 --------------------------------------------------------
 CFG, max, preds, true |- ty x = exp[] => CFG1, max, [] , false 
 
@@ -522,8 +522,8 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
             cfg1       = foldl (\g pred -> 
                                  M.update (\n -> Just n{ stmts=(stmts n) ++ [ s ]
                                                        , localDecls = (localDecls n) ++ lvars
-                                                       , lhsVars = (lhsVars n) ++ lvars
-                                                       , rhsVars = (rhsVars n) ++ rvars}) pred g) cfg0 preds0
+                                                       , lVars = (lVars n) ++ lvars
+                                                       , rVars = (rVars n) ++ rvars}) pred g) cfg0 preds0
         in do 
           { put st{cfg = cfg1} }        
       else 
@@ -625,6 +625,14 @@ getRHSVarFromExp (AST.CBuiltinExpr builtin )   = [] -- todo build in expression
 getVarFromExp :: AST.CExpression a -> [Ident]
 getVarFromExp = getRHSVarFromExp
 
+
+-- ^ get all variable from an expression, split them into lval and rval variables
+getVarsFromExp :: AST.CExpression a -> ([Ident], [Ident])
+getVarsFromExp (AST.CAssign op lhs rhs _)    =  
+  let (lvars1, rvars1) = getVarsFromExp lhs
+      (lvars2, rvars2) = getVarsFromExp rhs
+  in (lvars1 ++ lvars2, rvars1 ++ rvars2)
+getVarsFromExp e = undefined     
 
 -- ^ insert goto statement according to the succ 
 -- ^ 1. skipping if statement
