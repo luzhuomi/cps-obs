@@ -10,6 +10,7 @@ import Data.Maybe (isJust)
 
 import Language.C.Obfuscate.CFG 
 import Language.C.Obfuscate.Var
+import Language.C.Obfuscate.ASTUtils
 import Language.C.Data.Ident
 import qualified Language.C.Data.Node as N 
 

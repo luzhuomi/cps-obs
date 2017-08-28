@@ -17,6 +17,9 @@ import Control.Applicative
 import Control.Monad.State as M hiding (State)
 -- the data type of the control flow graph
 
+import Language.C.Obfuscate.ASTUtils
+
+
 -- import for testing
 import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
@@ -155,7 +158,8 @@ instance CProg (AST.CFunctionDef N.NodeInfo)  where
   buildCFG (AST.CFunDef tySpecfs declarator decls stmt nodeInfo)  = do {- stmt must be compound -} 
     { buildCFG stmt 
     ; st <- get
-    ; put st{cfg = insertGotos (cfg st)}
+    ; let fargs = concatMap getFormalArgIds (getFormalArgsFromDeclarator declarator)
+    ; put st{cfg = formalArgsAsDecls fargs (insertGotos (cfg st))}
     ; return ()
     }
   
@@ -728,3 +732,15 @@ insertGotos cfg =
                       }
   in M.map insertGT cfg
 
+-- TODO:
+-- I am trying to inject the formal arguments into the blk 0 as declaration so that
+-- they are taken into consideration in building the SSA.
+formalArgsAsDecls :: [Ident] -> CFG -> CFG
+formalArgsAsDecls idents cfg = cfg 
+{-
+  let entryLabel = iid (labPref ++ "0")
+  in case M.lookup entryLabel cfg of 
+    { Nothing -> cfg
+    ; Just n  -> M.update (\_ -> Just n{lVars = idents ++ (lVars n)}) entryLabel cfg 
+    }
+-}
