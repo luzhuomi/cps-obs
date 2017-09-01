@@ -30,7 +30,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCPS = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts  "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts  {- "test/sort.c" -- -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -323,8 +323,8 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
 cps_trans_stmt ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
-  { Just lb | not (null (phis lb)) -> 
-       let asgmts  = cps_trans_phis ctxtName ident li (phis lb)
+  { Just lb | not (null (lb_phis lb)) -> 
+       let asgmts  = cps_trans_phis ctxtName ident li (lb_phis lb)
            fname'  = fname `app` li
            args    = [ cvar k
                      , cvar (iid ctxtParamName)] 
@@ -565,32 +565,37 @@ P1 = void f1 (void => void k) { B1 }
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
 ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) = 
   let -- scraping the information from the top level function under obfuscation
-      funName = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
+      funName        = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
       formalArgDecls :: [AST.CDeclaration N.NodeInfo]
       formalArgDecls = getFormalArgs fundef
       formalArgIds :: [Ident]
-      formalArgIds = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
-      returnTy = getFunReturnTy fundef
+      formalArgIds   = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
+      returnTy       = getFunReturnTy fundef
       ctxtStructName = funName ++ "Ctxt"
+      
       -- the context struct declaration
-      labels = M.keys labelledBlocks
-      context = mkContext ctxtStructName labels formalArgDecls scopedDecls returnTy
-      ctxtName = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
+      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy 
+      ctxtName       = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
+      
       -- finding the visitor labels and the exit labels
-      visitors = allVisitors sdom labelledBlocks
-      exits    = allExits labelledBlocks
+      visitors       = allVisitors sdom labelledBlocks
+      exits          = allExits labelledBlocks
+      
       -- all the conditional function 
-      conds    = allLoopConds ctxtName funName labelledBlocks 
+      conds          = allLoopConds ctxtName funName labelledBlocks 
+      
       -- loop_cps, loop_lambda, id and pop and push
-      loop_cps = loopCPS ctxtName funName
+      loop_cps        = loopCPS ctxtName funName
       lambda_loop_cps = lambdaLoopCPS ctxtName funName
-      id_cps = idCPS ctxtName funName
-      push_cps = pushCPS ctxtName funName
-      pop_cps = popCPS ctxtName funName
+      id_cps          = idCPS ctxtName funName
+      push_cps        = pushCPS ctxtName funName
+      pop_cps         = popCPS ctxtName funName
+      
       -- all the "nested/helper" function declarations
-      ps = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
+      ps              = cps_trans_lbs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
+      
       -- all function signatures
-      funcSignatures = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])
+      funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])
       main_decls = 
         -- 1. malloc the context obj in the main func
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
@@ -605,8 +610,8 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         ] 
       main_stmts = 
         -- 2. initialize the counter-part  in the context of the formal args
-        -- forall arg. ctxt->arg 
-        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. arg) .=. (AST.CVar arg N.undefNode))) N.undefNode) | arg <- formalArgIds] ++ 
+        -- forall arg. ctxt->arg_label0 = arg 
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (arg `app` (iid $ labPref ++ "0" ))) .=. (AST.CVar arg N.undefNode))) N.undefNode) | arg <- formalArgIds] ++ 
         [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
                                            [ AST.CUnary AST.CAdrOp (AST.CVar ((iid funName) `app` (iid "id")) N.undefNode) N.undefNode
                                            , AST.CVar (iid ctxtParamName) N.undefNode ] N.undefNode)) N.undefNode)
@@ -831,8 +836,13 @@ funSig (AST.CFunDef tySpecfs declarator op_decls stmt nodeInfo) = AST.CDecl tySp
 
 
 -- ^ making the context struct declaration
-mkContext :: String -> [Ident] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclaration N.NodeInfo] -> [AST.CDeclarationSpecifier N.NodeInfo] -> AST.CDeclaration N.NodeInfo
-mkContext name labels formal_arg_decls local_var_decls returnType = -- todo the loop higher order function stack
+mkContext :: String -> 
+             M.Map Ident LabeledBlock -> 
+             [AST.CDeclaration N.NodeInfo] -> 
+             [AST.CDeclaration N.NodeInfo] -> 
+             [AST.CDeclarationSpecifier N.NodeInfo] -> 
+             AST.CDeclaration N.NodeInfo
+mkContext name labeledBlocks formal_arg_decls local_var_decls returnType  = 
   let structName  = iid name
       ctxtAlias   = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs       = []
@@ -853,17 +863,34 @@ mkContext name labels formal_arg_decls local_var_decls returnType = -- todo the 
       exitStack    = binaryFuncStack "loop_exits"
       currStackSize = AST.CDecl [AST.CTypeSpec intTy] [(Just (AST.CDeclr (Just $ iid currStackSizeName) [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
       funcResult    = AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-      decls'        = formal_arg_decls ++ concatMap (\d -> renameDeclWithLabels d labels) local_var_decls ++ [ksStack, condStack, visitorStack, exitStack, currStackSize, funcResult]
+      decls'        = formal_arg_decls ++ 
+                      -- concatMap (\d -> renameDeclWithLabels d labels) local_var_decls ++ -- can't just use the rename Decl. We need to decide which variable is (re-)defined in which block
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks) (formal_arg_decls ++ local_var_decls) ++ 
+                      [ksStack, condStack, visitorStack, exitStack, currStackSize, funcResult]
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
         AST.CTypeSpec (AST.CSUType
                        (AST.CStruct AST.CStructTag (Just structName) (Just decls') attrs N.undefNode) N.undefNode) 
   in AST.CDecl [tyDef, structDef] [(Just ctxtAlias, Nothing, Nothing)] N.undefNode
 
-
-
 renameDeclWithLabels :: AST.CDeclaration N.NodeInfo -> [Ident] -> [AST.CDeclaration N.NodeInfo]
 renameDeclWithLabels decl labels = map (renameDeclWithLabel decl) labels
+
+
+renameDeclWithLabeledBlocks :: AST.CDeclaration N.NodeInfo -> M.Map Ident LabeledBlock -> [AST.CDeclaration N.NodeInfo]
+renameDeclWithLabeledBlocks decl labeledBlocks = 
+  let idents = getFormalArgIds decl
+  in do 
+    { ident    <- idents
+    ; (lb,blk) <- M.toList labeledBlocks 
+    ; if (null (lb_preds blk)) ||  -- it's the entry block
+         (ident `elem` (lb_lvars blk)) ||  -- the var is in the lvars
+         (ident `elem` (map fst (lb_phis blk))) -- the var is in the phi
+      then return (renameDeclWithLabel decl lb) 
+      else []
+    }
+
+
   
 renameDeclWithLabel decl label =   
   let rnState = RSt label M.empty [] 

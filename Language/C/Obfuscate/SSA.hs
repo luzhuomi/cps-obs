@@ -305,11 +305,13 @@ modLoc :: Ident -> CFG -> [Ident]
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lVars node)) (M.toList cfg))
           
 
-data LabeledBlock = LB { phis :: [( Ident -- ^ var being redefined 
-                                  , [(Ident, Maybe Ident)])] -- ^ incoming block x last_defined block (it is maybe because it could be formal arg)
+data LabeledBlock = LB { lb_phis :: [( Ident -- ^ var being redefined 
+                                     , [(Ident, Maybe Ident)])] -- ^ incoming block x last_defined block (it is maybe because it could be formal arg)
                        , lb_stmts :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                        , lb_preds :: [NodeId]
                        , lb_succs :: [NodeId]
+                       , lb_lvars :: [Ident]
+                       , lb_rvars :: [Ident]
                        , lb_loop  :: Bool
                        }
                     deriving Show
@@ -355,13 +357,15 @@ prettySSA ssa = "scope_decls :" ++ (render $ pretty (scoped_decls ssa)) ++ "\n" 
                 "labelled_blocks :" ++ (concatMap (\(label, lb) ->  (render $ pretty label) ++ ":" ++ (prettyLB lb) ++ ",\n") (M.toList $ labelled_blocks ssa))
 -}
 
+-- TODO : incorporating the formal args as allVars
+
 buildSSA :: CFG -> SSA
 buildSSA cfg = 
   case buildDTree cfg of 
     { Nothing  -> error "failed to build dominance frontier table"
     ; Just (dtree, pcm, sdom) -> 
       let dft = buildDF' (dtree, pcm, sdom, cfg) 
-          localVars = allVars cfg
+          localVars = allVars cfg -- all vars include formal arguments
           -- build a mapping from node label to a 
           -- set of variables that need to be merged via phi func 
           -- (note: variables are not yet renamed)
@@ -390,11 +394,11 @@ buildSSA cfg =
                      ; Just node | var `elem` (lVars node) ->  Just currLbl
                      ; Just _ | otherwise -> 
                        case parentOf currLbl dt of 
-                         { Nothing -> -- no parent: this could be due to a nested scope var in some inner block of if else or while. 
+                         { Nothing -> -- no parent: this is block 0
+                              -- this could be due to a nested scope var in some inner block of if else or while. 
                               -- we will move it to block 0 (the init block) 
                               -- e.g. refer to the fibiter.c, the variable t
-                              -- Nothing 
-                              Just currLbl
+                              Just currLbl -- this make sense for block 0, all local variables should be lifted and declared in block 0 
                          ; Just parentLbl -> precDef parentLbl var dt cfg
                          }
                      }
@@ -427,19 +431,19 @@ buildSSA cfg =
                                    rvarsNotLocal = filter (\var -> not (var `M.member` rnEnvLocal)) rvars
                                    rnEnv = case precLbls of  
                                      { [] -> -- entry block -- todo: check, shouldn't be the formal arg?
-                                          M.fromList (map (\var -> (var, var {- var `app` currLbl-})) rvarsNotLocal)
+                                          M.fromList (map (\var -> (var, var {-var `app` currLbl-})) rvarsNotLocal)
                                      ; [precLbl] -> -- non-phi block
                                             M.fromList (map (\var -> 
                                                               case precDef precLbl var dtree cfg of 
                                                                 { Just def_lbl -> (var, var `app` def_lbl)
-                                                                ; Nothing      -> -- it is a formal arg
-                                                                     (var,var)
+                                                                ; Nothing      -> -- it is a formal arg and should be redefined in block 0
+                                                                     (var, var `app` (iid (labPref ++ "0")))
                                                                 }) rvarsNotLocal)
                                      ; _ -> -- phi block
                                           M.fromList (map (\var -> case lookup var phis_ of 
                                                               { Just _ -> (var, var `app` currLbl)
-                                                              ; Nothing -> -- not in phi, it's a formal arg
-                                                                   (var, var)
+                                                              ; Nothing -> -- not in phi, it's a formal arg  and should be redefined in block 0
+                                                                   (var, var `app` (iid (labPref ++ "0"))) 
                                                               }) rvarsNotLocal)
                                      }
                                in RSt currLbl (rnEnvLocal `M.union` rnEnv) []
@@ -448,7 +452,7 @@ buildSSA cfg =
                      renamedBlkItems_n_decls = renamePure rnState statements 
                      (renamedBlkItems, new_decls) = renamedBlkItems_n_decls
                               
-                     labelled_block = LB phis_ renamedBlkItems precLbls succLbls isloop
+                     labelled_block = LB phis_ renamedBlkItems precLbls succLbls (lVars node) (rVars node) isloop
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
@@ -464,5 +468,5 @@ buildSSA cfg =
 
 
 allVars :: CFG -> [Ident]
-allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lVars n) (M.toList cfg)))
+allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lVars n ++ rVars n) (M.toList cfg)))
   

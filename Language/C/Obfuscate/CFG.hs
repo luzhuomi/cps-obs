@@ -736,11 +736,9 @@ insertGotos cfg =
 -- I am trying to inject the formal arguments into the blk 0 as declaration so that
 -- they are taken into consideration in building the SSA.
 formalArgsAsDecls :: [Ident] -> CFG -> CFG
-formalArgsAsDecls idents cfg = cfg 
-{-
+formalArgsAsDecls idents cfg = -- cfg 
   let entryLabel = iid (labPref ++ "0")
   in case M.lookup entryLabel cfg of 
     { Nothing -> cfg
     ; Just n  -> M.update (\_ -> Just n{lVars = idents ++ (lVars n)}) entryLabel cfg 
     }
--}
