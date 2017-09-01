@@ -22,7 +22,8 @@ library
                          Language.C.Obfuscate.CFG 
                          Language.C.Obfuscate.SSA
                          Language.C.Obfuscate.CPS
-                         
+                         Language.C.Obfuscate.ASTUtils
+                                                  
   Buildable:              True
   Extensions:             GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
   GHC-Options:            
