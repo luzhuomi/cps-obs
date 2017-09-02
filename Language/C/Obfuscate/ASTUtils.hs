@@ -85,3 +85,8 @@ fun tySpec fname params stmts = AST.CFunDef tySpec (AST.CDeclr (Just fname) [AST
 -- ^ call a function
 funCall :: AST.CExpression N.NodeInfo -> [AST.CExpression N.NodeInfo] -> AST.CExpression N.NodeInfo
 funCall f args = AST.CCall f args N.undefNode
+
+
+isVoidDeclSpec :: [AST.CDeclarationSpecifier N.NodeInfo] -> Bool
+isVoidDeclSpec [ AST.CTypeSpec (AST.CVoidType _) ] = True
+isVoidDeclSpec _ = False
