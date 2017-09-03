@@ -1,4 +1,4 @@
-#include <stdio.h>
+// #include <stdio.h>
 // selection sort
 
 void sort(int a[], int size) {

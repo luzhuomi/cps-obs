@@ -24,15 +24,16 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 -- ^ top level function
 -- rename variables in block items and generate function scope declarations
-renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo])
+renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo], [Ident])
 renamePure rstate x = case MS.runState (rename x) rstate of 
-  { (y, rstate') -> (y, local_decls rstate') }
+  { (y, rstate') -> (y, local_decls rstate', containers rstate') }
 
 
 -- variable renaming
 data RenameState = RSt { lbl         :: Ident 
                        , rn_env      :: M.Map Ident Ident -- ^ variable -> renamed variable
                        , local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ inner declaralation to be made to be function scope (the renaming should be done during translation to CPS)
+                       , containers  :: [Ident] -- ^ lvars that are a struct, or pointer to struct, this will be use to create an extra scalar copy statement
                        }
                  deriving Show
 
@@ -99,8 +100,8 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     -- and move the declaration to the global level.
     { let (decl', stmt) = splitDecl decl --split the decl out first.
     ; stmt' <- rename stmt
-    ; RSt lbl rn_env local_decls <- get
-    ; put (RSt lbl rn_env (local_decls ++ [decl']))
+    ; RSt lbl rn_env local_decls containers <- get
+    ; put (RSt lbl rn_env (local_decls ++ [decl']) containers)
     ; return (AST.CBlockStmt stmt')
     } 
   update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
@@ -290,10 +291,10 @@ instance Renamable Ident where
       }
     }      
   update ident = do 
-    { RSt lbl env decls <- get
+    { RSt lbl env decls containers <- get
     ; let renamed = ident `app` lbl
           env'    = upsert ident renamed env
-    ; put (RSt lbl env' decls)
+    ; put (RSt lbl env' decls containers)
     ; return renamed
     }
 
@@ -332,7 +333,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CCond e1' mb_e2' e3' nodeInfo)
     }
   rename (AST.CBinary op e1 e2 nodeInfo) = do 
-    { st <- get
+    { -- st <- get
     ; e1' <- rename e1
     ; e2' <- rename e2
     ; return (AST.CBinary op e1' e2' nodeInfo)
@@ -411,12 +412,19 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     }
   update (AST.CIndex e i nodeInfo) = do 
     { e' <- update e
-    ; i' <- rename i -- i is not updated. 
+    ; i' <- rename i -- i is not updated
+    ; case e of 
+      { (AST.CVar id _) -> do 
+           { (RSt lbl env decls containers) <- get
+           ; put (RSt lbl env decls (containers ++ [id]))
+           }
+      ; _ -> return ()
+      }
     ; return (AST.CIndex e' i' nodeInfo)
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
-  update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp)
+  update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
   
   
                                  

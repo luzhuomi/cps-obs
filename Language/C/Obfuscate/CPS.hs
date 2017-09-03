@@ -30,7 +30,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCPS = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts  {- "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts   "test/sort.c" -- -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -40,8 +40,8 @@ testCPS = do
                 ; let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
                       visitors = allVisitors sdom labelledBlocks
                       exits    = allExits labelledBlocks
-                ; putStrLn $ show $ visitors
-                ; putStrLn $ show $ exits                  
+                -- ; putStrLn $ show $ visitors
+                -- ; putStrLn $ show $ exits                  
 
                 ; let cps = ssa2cps fundef (buildSSA (cfg state))
                 ; putStrLn $ prettyCPS $ cps
@@ -912,9 +912,9 @@ renameDeclWithLabeledBlocks decl labeledBlocks =
 
   
 renameDeclWithLabel decl label =   
-  let rnState = RSt label M.empty [] 
+  let rnState = RSt label M.empty [] []
   in case renamePure rnState decl of 
-    { (decl', rstate') -> decl' }
+    { (decl', rstate', containers) -> decl' }
 
 
 

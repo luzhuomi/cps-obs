@@ -8,6 +8,8 @@ import qualified Data.Set as S
 import Data.List
 import Data.Maybe (isJust)
 
+import System.IO.Unsafe (unsafePerformIO)
+
 import Language.C.Obfuscate.CFG 
 import Language.C.Obfuscate.Var
 import Language.C.Obfuscate.ASTUtils
@@ -27,7 +29,7 @@ import qualified Language.C.Syntax.AST as AST
 
 testSSA = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts {- "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/sort.c" -- -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -431,7 +433,7 @@ buildSSA cfg =
                                    rvarsNotLocal = filter (\var -> not (var `M.member` rnEnvLocal)) rvars
                                    rnEnv = case precLbls of  
                                      { [] -> -- entry block -- todo: check, shouldn't be the formal arg?
-                                          M.fromList (map (\var -> (var, var {-var `app` currLbl-})) rvarsNotLocal)
+                                          M.fromList (map (\var -> (var, var `app` currLbl)) rvarsNotLocal)
                                      ; [precLbl] -> -- non-phi block
                                             M.fromList (map (\var -> 
                                                               case precDef precLbl var dtree cfg of 
@@ -439,25 +441,60 @@ buildSSA cfg =
                                                                 ; Nothing      -> -- it is a formal arg and should be redefined in block 0
                                                                      (var, var `app` (iid (labPref ++ "0")))
                                                                 }) rvarsNotLocal)
-                                     ; _ -> -- phi block
+                                     ; precLbls -> -- phi block
                                           M.fromList (map (\var -> case lookup var phis_ of 
                                                               { Just _ -> (var, var `app` currLbl)
-                                                              ; Nothing -> -- not in phi, it's a formal arg  and should be redefined in block 0
-                                                                   (var, var `app` (iid (labPref ++ "0"))) 
+                                                              ; Nothing -> 
+                                                                   -- not in phi, it's a formal arg  and should be redefined in block 0
+                                                                   -- (var, var `app` (iid (labPref ++ "0"))) 
+                                                                   
+                                                                   -- updated: the above is not true, look at sort example, var j in node 7. (7 has preds 4 and 6, both do not redefine j, 
+                                                                   -- node 4 & 6 share a common ancestor 3 where j is redefined
+                                                                   case map (\precLbl -> precDef precLbl var dtree cfg) precLbls of 
+                                                                     { [] -> error "impossible"
+                                                                     ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) -> 
+                                                                            let (Just def_lbl) = def  
+                                                                            in (var, var `app` def_lbl)
+                                                                                  | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition"
+                                                                     }
                                                               }) rvarsNotLocal)
                                      }
-                               in RSt currLbl (rnEnvLocal `M.union` rnEnv) []
+                               in RSt currLbl (rnEnvLocal `M.union` rnEnv) [] []
                              
-                     renamedBlkItems_n_decls :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo])
-                     renamedBlkItems_n_decls = renamePure rnState statements 
-                     (renamedBlkItems, new_decls) = renamedBlkItems_n_decls
+                     renamedBlkItems_decls_containers :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo], [Ident])
+                     renamedBlkItems_decls_containers = renamePure rnState statements 
+                     (renamedBlkItems, new_decls, containers) = renamedBlkItems_decls_containers
+                     -- scalar copy for container variables eg. say a[] then a[i] = a[j] --> a_2 = a_1; a_2[i_2] = a_1[j_2];
+                     scalar_copy :: [Ident] -> [AST.CCompoundBlockItem N.NodeInfo] 
+                     scalar_copy containers = 
+                       concatMap (\container -> -- lookup the last def of container variable, similar to building rnState
+                                   let containers' = case precLbls of  
+                                         { [] -> [] -- entry block
+                                         ; [precLbl] -> case precDef precLbl container dtree cfg of 
+                                              { Just def_lbl -> [container `app` def_lbl]
+                                              ; Nothing      -> [container `app` (iid (labPref ++ "0"))]
+                                              }
+                                         ; precLbls -> case lookup container phis_ of  -- phi block
+                                              { Just _  -> [] -- should be covered by the phi translations
+                                              ; Nothing -> 
+                                                   case map (\precLbl -> precDef precLbl container dtree cfg) precLbls of 
+                                                     { [] -> error "impossible"
+                                                     ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) -> 
+                                                             let (Just def_lbl) = def  
+                                                             in [container, container `app` def_lbl]
+                                                                  | otherwise -> error $ "buildSSA: scalar copy variable " ++ (show container) ++ " has a conflicting preceding definition"
+                                                     }
+                                              }
+                                         }
+                                   in map (\container' -> AST.CBlockStmt (AST.CExpr (Just ((cvar (container `app` currLbl)) .=. (cvar container'))) N.undefNode)) containers' 
+                                 ) containers
                               
-                     labelled_block = LB phis_ renamedBlkItems precLbls succLbls (lVars node) (rVars node) isloop
+                     labelled_block = LB phis_ ((scalar_copy containers) ++ renamedBlkItems) precLbls succLbls (lVars node) (rVars node) isloop
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 
           ssa = foldl eachNode (SSA [] M.empty sdom) $ M.toList cfg
-      in ssa   -- the scoped_decls were not yet renamed.
+      in ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
     }
 
 
