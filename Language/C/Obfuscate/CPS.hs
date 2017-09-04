@@ -627,6 +627,9 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg_label0 = arg 
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (arg `app` (iid $ labPref ++ "0" ))) .=. (AST.CVar arg N.undefNode))) N.undefNode) | arg <- formalArgIds] ++ 
+        -- initialize the context->curr_stack_size = 0;
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (iid currStackSizeName) .=. (AST.CConst (AST.CIntConst (cInteger 0) N.undefNode))))) N.undefNode) ] ++ 
+        -- calling block 0
         [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
                                            [ AST.CUnary AST.CAdrOp (AST.CVar ((iid funName) `app` (iid "id")) N.undefNode) N.undefNode
                                            , AST.CVar (iid ctxtParamName) N.undefNode ] N.undefNode)) N.undefNode)
