@@ -188,7 +188,15 @@ buildDF' (dtree, pcm, sdom, cfg) =
   -- DF(a) is the dominance frontier for node a.
   -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
   -- Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
+  -- 
+  -- WAIT, the reference says
 
+  -- DF(a) = DF1(a) \union { b | c \in child(a), b \in DFup(c) } 
+  -- They are they same!
+  -- by definition of DFup(c)
+  --       = DF1(a) \union { b | c \in child(a), b \in DF(c), not (idom(c) sdom b) }
+  --       = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
+  -- we don't need to compute DFup -- todo, remove DFup or use it in computing DF(a)
   let po :: [Ident]
       po = postOrder dtree
         
