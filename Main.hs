@@ -26,25 +26,27 @@ main = do
   ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts src
   ; case ast of 
     { AST.CTranslUnit defs nodeInfo -> do 
-         writeFile dest
-         mapM_ (\def -> case def of 
-                   { AST.CFDefExt fundef | not (isMain fundef) -> 
-                        case runCFG fundef of
-                          { CFGOk (_, state) -> do 
-                               { let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
-                                     visitors = allVisitors sdom labelledBlocks
-                                     exits    = allExits labelledBlocks
-                                     cps = ssa2cps fundef (buildSSA (cfg state))
-                               ; appendFile dest (prettyCPS cps) 
-                               ; appendFile dest "\n"
-                               }
-                          ; CFGError s       -> error s
+         { writeFile dest ""
+         ; mapM_ (\def -> case def of 
+                     { AST.CFDefExt fundef | not (isMain fundef) -> 
+                          case runCFG fundef of
+                            { CFGOk (_, state) -> do 
+                                 { let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
+                                       visitors = allVisitors sdom labelledBlocks
+                                       exits    = allExits labelledBlocks
+                                       cps = ssa2cps fundef (buildSSA (cfg state))
+                                 ; appendFile dest (prettyCPS cps) 
+                                 ; appendFile dest "\n"
+                                 }
+                            ; CFGError s       -> error s
+                            }
+                     ; other_def -> do 
+                          { appendFile dest (render $ pretty other_def)
+                          ; appendFile dest "\n"
                           }
-                   ; other_def -> do 
-                        appendFile dest (render $ pretty other_def)
-                        appendFile dest "\n"
-                   }
-               ) defs
+                     }
+                 ) defs
+         }
     ; _ -> error "not fundec"
     }
   }
