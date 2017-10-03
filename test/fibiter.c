@@ -1,3 +1,4 @@
+#include <stdio.h>
 int fib(int x)
 {
   int f1 = 1;
@@ -9,4 +10,10 @@ int fib(int x)
       f2 = t;
     }
   return f2;
+}
+
+
+int main() {
+  printf("%d\n", fib(10));
+  return 0;
 }
