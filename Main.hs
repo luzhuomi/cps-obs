@@ -25,7 +25,8 @@ main = do
   ; let (src:dest:_) = args
   ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts src
   ; case ast of 
-    { AST.CTranslUnit defs nodeInfo -> 
+    { AST.CTranslUnit defs nodeInfo -> do 
+         writeFile dest
          mapM_ (\def -> case def of 
                    { AST.CFDefExt fundef | not (isMain fundef) -> 
                         case runCFG fundef of
@@ -35,10 +36,13 @@ main = do
                                      exits    = allExits labelledBlocks
                                      cps = ssa2cps fundef (buildSSA (cfg state))
                                ; appendFile dest (prettyCPS cps) 
+                               ; appendFile dest "\n"
                                }
                           ; CFGError s       -> error s
                           }
-                   ; other_def -> appendFile dest (render $ pretty other_def)
+                   ; other_def -> do 
+                        appendFile dest (render $ pretty other_def)
+                        appendFile dest "\n"
                    }
                ) defs
     ; _ -> error "not fundec"
