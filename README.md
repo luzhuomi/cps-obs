@@ -17,5 +17,10 @@ asmbly statement not supported.
 CallStack (from HasCallStack):
   error, called at Main.hs:41:51 in main:Main
 ```
-
+Or in Mac OS X, we will encounter
+```
+Parse Error: /usr/include/stdio.h:133: (column 19) [ERROR]  >>> Syntax Error !
+  Syntax error !
+  The symbol `_close' does not fit here.
+```
 Kindly comment away the #include ... from the source file and add them back to the obfuscated files manually, until we figure out how to resolve it.
