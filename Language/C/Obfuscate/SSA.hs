@@ -419,7 +419,7 @@ buildSSA cfg =
           
           eachNode :: SSA -> (Ident, Node) -> SSA
           eachNode ssa (currLbl, node) = case node of 
-            { Node statements lvars rvars local_decls precLbls succLbls isloop -> 
+            { Node statements lvars rvars local_decls precLbls succLbls switchOrLoop -> 
                  let phis_ :: [( Ident -- ^ var being redefined (not yet renamed)
                               , [(Ident, Maybe Ident)])] -- ^ (incoming block lbl, lbl of preceding blk in which var is redefined)
                      phis_ = case M.lookup currLbl phiLocMap of 
@@ -496,8 +496,8 @@ buildSSA cfg =
                                          }
                                    in map (\container' -> AST.CBlockStmt (AST.CExpr (Just ((cvar (container `app` currLbl)) .=. (cvar container'))) N.undefNode)) containers' 
                                  ) containers
-                              
-                     labelled_block = LB phis_ ((scalar_copy containers) ++ renamedBlkItems) precLbls succLbls (lVars node) (rVars node) isloop
+                     isLoop x = case x of { (IsLoop _ _) -> True ; _ -> False }
+                     labelled_block = LB phis_ ((scalar_copy containers) ++ renamedBlkItems) precLbls succLbls (lVars node) (rVars node) (isLoop switchOrLoop)
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             } 

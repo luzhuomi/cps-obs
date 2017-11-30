@@ -20,7 +20,7 @@ void sort(int a[], int size) {
 
 
 
-/*
+
 int main()
 {
   int a[] = {2,7,4,5,1,0};
@@ -32,7 +32,7 @@ int main()
     }
   return 0;
 }
-*/
+
 
 /*
 first we rewrite the above program with explicit goto instead of for-loop, 

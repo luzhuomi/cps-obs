@@ -58,6 +58,11 @@ lookupCFG :: NodeId -> CFG -> Maybe Node
 lookupCFG id cfg = M.lookup id cfg
 
 
+data SwitchOrLoop = Neither
+  | IsSwitch [NodeId] [NodeId] 
+  | IsLoop [NodeId] [NodeId] 
+  deriving Show
+
                           
 data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compound stmt
                  , lVars :: [Ident] -- ^ all the lval variables, e.g. x in x = y; x in x[i] = y
@@ -65,7 +70,7 @@ data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compoun
                  , localDecls :: [Ident] -- ^ all the variables that are declared locally in this node.
                  , preds   :: [NodeId]
                  , succs   :: [NodeId]
-                 , isLoop  :: Bool     -- ^ to indicate whether a if node is desugared from a loop (while / for loop)
+                 , switchOrLoop  :: SwitchOrLoop       -- ^ to indicate whether a if node is desugared from a loop (while / for loop)
                  } 
                    
 
@@ -84,6 +89,8 @@ data StateInfo = StateInfo { currId :: Int
                            , currPreds ::[NodeId]
                            , continuable :: Bool
                            -- , stmtUpdate :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
+                           , contNodes :: [NodeId]
+                           , breakNodes :: [NodeId]
                            } deriving Show
                  
 -- instance Show StateInfo where                 
@@ -93,7 +100,7 @@ labPref :: String
 labPref = "myLabel"
 
 
-initStateInfo = StateInfo 0 M.empty [] False 
+initStateInfo = StateInfo 0 M.empty [] False [] []
 
 
 
@@ -151,6 +158,13 @@ runCFG fundef =
   runStateT (buildCFG fundef) initStateInfo
           
 
+-- build a partial CFG, it is "partial" in the sense that 
+-- 1) the original goto are not yet connected to the labeled block
+--      i.e. labeled block's preds list is yet to include the goto's block label
+-- 2) the succs of the continue and break blocks yet need to updated
+--      but the continue and break's block label should be associated with the parent (switch or loop) block label
+-- 3) the gotos need to be generated non-goto block (end of the block, a "goto succLabel" is required to be inserted before SSA to be built)
+
 class CProg a  where
   buildCFG :: a -> State StateInfo ()
   
@@ -181,7 +195,7 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
           cfg0       = cfg st 
           preds0     = currPreds st
           cfgNode    = Node [AST.CBlockStmt $ 
-                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] [] preds0 [] False
+                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] [] preds0 [] Neither
           cfg1       = M.insert label cfgNode $ 
                        foldl (\g pred -> M.update (\n -> Just n{succs = [label]}) pred g) cfg0 preds0
     ; put st{cfg = cfg1, currPreds=[label], continuable = False}
@@ -224,12 +238,14 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
         let max        = currId st
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
-            cfgNode    = Node [s] lhs rhs [] preds0 [] False
+            cfgNode    = Node [s] lhs rhs [] preds0 [] Neither
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
-  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreIncOp e nodeInfo')) nodeInfo) = -- todo: what about the ++e and --e is a sub expression of some other expression
+  buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreIncOp e nodeInfo')) nodeInfo) = 
+    -- todo: i++ ==> (i=i+1)-1
+    -- done: ++i ==> i=i+1
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostIncOp e nodeInfo')) nodeInfo) = 
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
@@ -248,12 +264,11 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
       then 
         let cfg1       = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], lVars=(lVars n)++lhs, rVars = (rVars n) ++ rhs}) pred g) cfg0 preds0
         in do { put st{cfg = cfg1, continuable = True} }   
-
       else 
         let max        = currId st
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
-            cfgNode    = Node [s] [] rhs [] preds0 [] False
+            cfgNode    = Node [s] [] rhs [] preds0 [] Neither
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
@@ -297,7 +312,7 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
                  -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
                  -- we can give an empty statement to the new CFG node in CFG1 first and update it
                  -- after we have max2,
-                 cfgNode    = Node [] lhs rhs [] preds0 [] False
+                 cfgNode    = Node [] lhs rhs [] preds0 [] Neither
                  cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
                  cfg1       = M.insert currNodeId cfgNode cfg1'
                               
@@ -334,10 +349,12 @@ CFG, max, preds, continuable |- if exp { trueStmt }   => CFG', max', preds', con
   -- statements
 {-  
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds ++ preds1 } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ]
-CFG1, max1, {max}, false |-n stmt => CFG2, max2, preds1, _ 
---------------------------------------------------------------------------------------
-CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds ++ preds1 } \union { max: { stmts = [ if exp { goto max1 } else { goto max2 } ] } }
+CFG1, max1, {max}, false, {}, {} |-n stmt => CFG2, max2, preds1, _, contNodes2, breakNodes2,  
+CFG3 = CFG2 \update { id : { succ = max} | id <- contNodes2 } \update { id : { succ = max2 } | id <- breakNodes2 } \update { max : { preds = preds ++ contNodes2 } }
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2, {max} ++ breakNodes2, false, contNodes, breakNodes  
+    -- shouldn't be max2? no, should be max, because max2's block will be created after this statment
 -}
   buildCFG (AST.CWhile exp stmt False nodeInfo) = do -- while
     { st <- get 
@@ -347,14 +364,16 @@ CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
           max1       = max + 1
           cfg0       = cfg st 
           preds0     = currPreds st
+          contNodes0 = contNodes st
+          breakNodes0 = breakNodes st
           -- note: we dont have max2 and preds1 until we have CFG1
           -- CFG1, max1, {max}, false |-n trueStmt => CFG2, max2, preds1, _ 
           -- we can give an empty statement to the new CFG node in CFG1 first and update it
           -- after we have max2,
-          cfgNode    = Node [] lhs rhs [] preds0 [] True
+          cfgNode    = Node [] lhs rhs [] preds0 [] (IsLoop [] [])
           cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
           cfg1       = M.insert currNodeId cfgNode cfg1'
-    ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
+    ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False, contNodes = [], breakNodes = []}
     ; buildCFG stmt 
     ; st1 <- get
     ; let max2      = currId st1
@@ -364,20 +383,24 @@ CFG, max, preds, _ |- while (exp) { stmt } => CFG2, max2, {max}, false
                       (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo
           cfg2      = cfg st1
           cfg2'     = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg2 preds1
+          breakNodes2 = breakNodes st1
+          contNodes2  = contNodes st1
           -- add the stmt back to the curr node (If statement)
-          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1}) currNodeId cfg2'
-    ; put st1{cfg = cfg2'', currId=max2, currPreds=[currNodeId], continuable = False}
+          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2' 
+          cfg3       = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) l g) cfg2'' contNodes2 -- update the break and cont immediately
+          cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
+    ; put st1{cfg = cfg2'', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
     }
 {-  
 CFG, max, preds, continuable |- stmt => CFG1, max1, preds1, false 
-CFG1, max1, preds1, false    |- while (exp) { stmt } => CFG2, max2, preds2, continuable
+CFG1, max1, preds1, false, contNodes, breakNodes |- while (exp) { stmt } => CFG2, max2, preds2, continuable, contNodes', breakNodes'
 --------------------------------------------------------------------------------------
-CFG, max, preds, continuable |- do  { stmt } while (exp) => CFG2, max2, {max}, false
+CFG, max, preds, continuable, contNodes, breakNodes |- do  { stmt } while (exp) => CFG2, max2, {max}, false, contNodes', breakNodes'
 -}
                                                   
-  buildCFG (AST.CWhile exp stmt True nodeInfo) = do   -- do ... while
+  buildCFG (AST.CWhile exp stmt True nodeInfo) = do   -- do ... while 
     { buildCFG stmt
-    ; buildCFG (AST.CWhile exp stmt False nodeInfo)
+    ; buildCFG (AST.CWhile exp stmt False nodeInfo) -- todo remove labels in stmt
     }
                                                                                                   
                                                  
@@ -414,11 +437,16 @@ CFG, max, preds, true |- for (init; exp2; exp3) { stmt }  => CFG2, max', preds',
             }
 
   -- | for statement @CFor init expr-2 expr-3 stmt@, where @init@ is
-  -- either a declaration or initializing expression
+  -- either a declaration or initi-- todo: don't we need to propogate the current preds?alizing expression
 {-
+-- check:don't we need to propogate the current preds? next statement in the lexical order won't be the succ of the goto
+-- we need to update the node L is a successor, but node L might not yet be created. 
+
 CFG1 = CFG \update { pred : {stmts = stmts ++ [goto L] } } 
 --------------------------------------------------------
-CFG, max, preds, true |- goto L => CFG1, max, [] , false 
+CFG, max, preds, true |- goto L => CFG1, max, [] , false  
+
+
 
 max1 = max + 1
 CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L } } 
@@ -443,7 +471,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CGoto ident nodeInfo
-            cfgNode    = Node [s] [] [] [] preds0 [] False
+            cfgNode    = Node [s] [] [] [] preds0 [] Neither
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -451,10 +479,75 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
     }
   buildCFG (AST.CGotoPtr exp nodeInfo) =  
     fail $ (posFromNodeInfo nodeInfo) ++ "goto pointer stmt not supported."
-  buildCFG (AST.CCont nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ "continue stmt not supported."
-  buildCFG (AST.CBreak nodeInfo) =   
-    fail $ (posFromNodeInfo nodeInfo) ++ "break stmt not supported."
+  buildCFG (AST.CCont nodeInfo) = do 
+    { st <- get
+    ; if (continuable st) 
+      then 
+{-  
+CFG1 = CFG \update { pred: {stmts = stmts ++ [continue] } | pred <- preds } 
+-----------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, true, contNode, breakNodes |- continue =>  CFG1, max, {}, false, contNode \union preds, breakNodes 
+-}
+        let cfg0 = cfg st
+            preds0 = currPreds st
+            s      = AST.CBlockStmt $ AST.CCont nodeInfo
+            cfg1 = foldl (\g pred -> M.update (\n -> Just n{stmts = (stmts n) ++ [s]}) pred g) cfg0 preds0
+        in do 
+          { put st{cfg = cfg1, currPreds=[], continuable = False, contNodes =((contNodes st) ++ preds0)} }
+      else
+{-  
+max1 = max + 1
+CFG1 = CFG \update { pred: {succ = max} | pred <- preds } \union { max : { stmts = [ continue ], preds = preds, succ = [] } }  
+-----------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, false, contNode, breakNodes |- continue =>  CFG1, max1, {max}, false, contNode \union { max }, breakNodes 
+-}
+        let max = currId st
+            currNodeId = internalIdent (labPref ++ show max)
+            max1 = max + 1
+            cfg0 = cfg st
+            preds0 = currPreds st
+            s      = AST.CBlockStmt $ AST.CCont nodeInfo
+            cfgNode = Node [s] [] [] [] preds0 [] Neither
+            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+            cfg1  = M.insert currNodeId cfgNode cfg1'
+        in do 
+          { put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False, contNodes = (contNodes st) ++ [currNodeId] } }
+    }
+    
+  buildCFG (AST.CBreak nodeInfo) = do
+    { st <- get
+    ; if (continuable st) 
+      then 
+{-  
+CFG1 = CFG \update { pred: {stmts = stmts ++ [break] } | pred <- preds } 
+-----------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, true, contNodes, breakNodes |- break =>  CFG1, max, {}, false, contNodes, breakNode \union preds 
+-}
+        let cfg0 = cfg st
+            preds0 = currPreds st
+            s      = AST.CBlockStmt $ AST.CBreak nodeInfo
+            cfg1 = foldl (\g pred -> M.update (\n -> Just n{stmts = (stmts n) ++ [s]}) pred g) cfg0 preds0
+        in do 
+          { put st{cfg = cfg1, currPreds=[], continuable = False, breakNodes =((breakNodes st) ++ preds0)} }
+      else
+{-  
+max1 = max + 1
+CFG1 = CFG \update { pred: {succ = max} | pred <- preds } \union { max : { stmts = [ break ], preds = preds, succ = [] } }  
+-----------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, false, contNodes, breakNodes |- continue =>  CFG1, max1, {max}, false, contNodes, breakNodes \union { max }
+-}
+        let max = currId st
+            currNodeId = internalIdent (labPref ++ show max)
+            max1 = max + 1
+            cfg0 = cfg st
+            preds0 = currPreds st
+            s      = AST.CBlockStmt $ AST.CBreak nodeInfo
+            cfgNode = Node [s] [] [] [] preds0 [] Neither
+            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+            cfg1  = M.insert currNodeId cfgNode cfg1'
+        in do 
+          { put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False, breakNodes = (breakNodes st) ++ [currNodeId] } }
+    }
 {-  
 CFG1 = CFG \update { pred : {stmts = stmts ++ [ return exp ] } } 
 --------------------------------------------------------
@@ -484,7 +577,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt  $ AST.CReturn mb_expression modeInfo
-            cfgNode    = Node [s] lhs rhs [] preds0 [] False
+            cfgNode    = Node [s] lhs rhs [] preds0 [] Neither
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -538,7 +631,7 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
             s          = AST.CBlockDecl (AST.CDecl specs divs nodeInfo) 
             lvars      = getLHSVarsFromDecl divs
             rvars      = getRHSVarsFromDecl divs
-            cfgNode    = Node [s] lvars rvars lvars preds0 [] False
+            cfgNode    = Node [s] lvars rvars lvars preds0 [] Neither
             cfg1'      = foldl (\g pred -> 
                                  M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
@@ -720,14 +813,41 @@ insertGotos cfg =
       endsWithGoto [AST.CBlockStmt (AST.CGoto succ _)] = True
       endsWithGoto (_:xs) = endsWithGoto xs
       
+
+      endsWithBreak :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+      endsWithBreak [] = False
+      endsWithBreak [AST.CBlockStmt (AST.CBreak _)] = True
+      endsWithBreak (_:xs) = endsWithBreak xs
+
+      endsWithCont :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+      endsWithCont [] = False
+      endsWithCont [AST.CBlockStmt (AST.CCont _)] = True
+      endsWithCont (_:xs) = endsWithCont xs
+
+      removeLast :: [AST.CCompoundBlockItem N.NodeInfo]  -> [AST.CCompoundBlockItem N.NodeInfo] 
+      removeLast [] = []
+      removeLast xs = init xs
+
       insertGT :: Node -> Node 
       insertGT node | containsIf (stmts node) = node
                     | endsWithGoto (stmts node) = node
+                    | endsWithBreak (stmts node) = case succs node of 
+                      { [] -> node{stmts=(removeLast $ stmts node)}
+                      ; (succ:_) -> 
+                        let gt = AST.CBlockStmt (AST.CGoto succ N.undefNode)
+                        in node{stmts=(removeLast $ stmts node) ++ [gt]}
+                      }
+                    | endsWithCont (stmts node) = case succs node of 
+                      { [] -> node{stmts=(removeLast $ stmts node)}
+                      ; (succ:_) -> 
+                        let gt = AST.CBlockStmt (AST.CGoto succ N.undefNode)
+                        in node{stmts=(removeLast $ stmts node) ++ [gt]}
+                      }      
                     | otherwise = case succs node of
                       { [] -> -- the last node
                            node
                       ; (succ:_) -> -- should be singleton
-                        let gt = (AST.CBlockStmt (AST.CGoto succ N.undefNode))
+                        let gt = AST.CBlockStmt (AST.CGoto succ N.undefNode)
                         in node{stmts=(stmts node) ++ [gt]}
                       }
   in M.map insertGT cfg
