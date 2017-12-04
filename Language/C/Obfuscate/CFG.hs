@@ -91,16 +91,21 @@ data StateInfo = StateInfo { currId :: Int
                            -- , stmtUpdate :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
                            , contNodes :: [NodeId]
                            , breakNodes :: [NodeId]
+                           , caseNodes :: [(NodeId, CaseExp)] -- case node
                            } deriving Show
                  
 -- instance Show StateInfo where                 
 --   show (StateInfo cId cfg currPreds continuable) = show cId ++ "\t" ++ show cfg
 
+
+data CaseExp = DefaultCase 
+             | ExpCase (AST.CExpression N.NodeInfo) deriving Show
+
 labPref :: String
 labPref = "myLabel"
 
 
-initStateInfo = StateInfo 0 M.empty [] False [] []
+initStateInfo = StateInfo 0 M.empty [] False [] [] []
 
 
 
@@ -201,6 +206,10 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
     ; put st{cfg = cfg1, currPreds=[label], continuable = False}
     ; buildCFG stmt 
     }
+{-
+-------------------------------------------------------------------------------------------------------------------------------------                                                  
+CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => CFG2, max2, preds2 continuable2, breakNodes, contNodes2, caseNodes2 \union (max, e) 
+-}
   buildCFG (AST.CCase exp stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " case stmt not supported."
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
@@ -342,8 +351,56 @@ CFG, max, preds, continuable |- if exp { trueStmt }   => CFG', max', preds', con
 -}                                
       ; Nothing -> buildCFG (AST.CIf exp trueStmt (Just $ AST.CCompound [] [] nodeInfo) nodeInfo) 
       }
-  buildCFG (AST.CSwitch exp swStmt nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ "switch stmt not supported."
+  buildCFG (AST.CSwitch exp swStmt nodeInfo) = do 
+{-    
+max1 = max + 1
+CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else if (exp == e2) { goto l2; } ... else { goto ldefault; } } },
+                                                                succs = {l1,l2,...,ldefault}, preds = preds }
+CFG1, max1, {max}, false, {}, contNodes, {} |- stmt1,..., stmtn => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,e1),...,(l_default, _)} 
+CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in dom(CFG2) - dom(CFG1) and preds(l) \intersect breakNodes2 != {} } 
+             \update { { l : { preds = preds \union {max} } | l \in dom(CFG2) - dom(CFG1) and preds(l) \intersect breakNodes2 == {} } 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2', max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
+-}
+    
+    { st <- get 
+    ; let max = currId st
+          currNodeId = internalIdent (labPref++show max)          
+          (lhs,rhs)  = getVarsFromExp exp          
+          max1       = max + 1
+          cfg0       = cfg st 
+          preds0     = currPreds st
+          contNodes0 = contNodes st
+          breakNodes0 = breakNodes st
+          caseNodes0 = caseNodes st
+          -- note: we dont have max2 and preds1 until we have CFG1
+          -- CFG1, max1, {max}, false, {}, contNodes, {} |- stmt1,..., stmtn => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,e1),...,(l_default, _)} 
+          -- we can give an empty statement to the new CFG node in CFG1 first and update it
+          -- after we have max2,          
+          cfgNode = Node [] lhs rhs [] preds0 [] Neither
+          cfg1'   = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0 
+          cfg1    = M.insert currNodeId cfgNode cfg1'
+    ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False, breakNodes = [], caseNodes = [] }
+    ; buildCFG swStmt
+    ; st1 <- get 
+    ; let max2 = currId st1
+          cfg2 = cfg st1
+          breakNodes2 = breakNodes st1
+          caseNodes2 = caseNodes st1
+          newLabs    = cfg2 `M.difference` cfg1
+          newLabsWBreaks = newLabs `M.intersection` (M.fromList (zip breakNodes2 (repeat ())))
+          newLabsWoBreaks = newLabs `M.difference` (M.fromList (zip breakNodes2 (repeat ())))
+          cfg2' = foldl (\g l -> M.update (\n -> Just n{preds = [currNodeId]}) l g) cfg2 (map fst $ M.toList newLabsWBreaks)
+          cfg2'' = foldl (\g l -> M.update (\n -> Just n{preds = (preds n) ++ [currNodeId]}) l g) cfg2' (map fst $ M.toList newLabsWoBreaks)
+          casesToIf cases = case cases of 
+            { [] -> error "empty Switch statements"
+            ; [(l,ExpCase e)] -> AST.CIf (exp .==. e) (AST.CGoto l nodeInfo) Nothing nodeInfo
+            ; (l, DefaultCase):_ -> AST.CGoto l nodeInfo
+            ; (l, ExpCase e):cases' -> AST.CIf (exp .==. e) (AST.CGoto l nodeInfo) (Just (casesToIf cases')) nodeInfo
+            }
+          cfg2''' = M.update (\n -> Just n{stmts = [ AST.CBlockStmt $ casesToIf caseNodes2 ], succs = (map (\(l,_) -> l) caseNodes2)}) currNodeId cfg2'' 
+    ; put st1{cfg = cfg2''', currPreds = (currPreds st1) ++ breakNodes2, continuable=False, breakNodes = breakNodes0, caseNodes= caseNodes0}
+    }
   -- | switch statement @CSwitch selectorExpr switchStmt@, where
   -- @switchStmt@ usually includes /case/, /break/ and /default/
   -- statements

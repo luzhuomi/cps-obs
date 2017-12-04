@@ -47,6 +47,9 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 (.=.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.=.) lhs rhs = AST.CAssign AST.CAssignOp lhs rhs N.undefNode
 
+(.==.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.==.) lhs rhs = AST.CBinary AST.CEqOp lhs rhs N.undefNode
+
 (.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
 (.->.) struct member = AST.CMember struct member True N.undefNode
 
