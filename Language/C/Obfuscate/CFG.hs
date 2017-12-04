@@ -207,15 +207,33 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
     ; buildCFG stmt 
     }
 {-
--------------------------------------------------------------------------------------------------------------------------------------                                                  
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- stmt => CFG2, max2, preds2, continuable2, breakNodes2, contNodes2, caseNodes2 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------ 
 CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => CFG2, max2, preds2 continuable2, breakNodes, contNodes2, caseNodes2 \union (max, e) 
 -}
-  buildCFG (AST.CCase exp stmt nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ " case stmt not supported."
+  buildCFG (AST.CCase exp stmt nodeInfo) = do 
+    { st <- get
+    ; let max        = currId st
+          currNodeId = internalIdent (labPref++show max)
+    ; buildCFG stmt 
+    ; st1 <- get
+    ; put st{caseNodes=(caseNodes st)++[(currNodeId, ExpCase exp)]}
+    }
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
-  buildCFG (AST.CDefault stmt nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ " default case stmt not supported."
+{-
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- stmt => CFG2, max2, preds2, continuable2, breakNodes2, contNodes2, caseNodes2 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------ 
+CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- default: stmt => CFG2, max2, preds2 continuable2, breakNodes, contNodes2, caseNodes2 \union (max, default) 
+-}
+  buildCFG (AST.CDefault stmt nodeInfo) = do
+    { st <- get
+    ; let max        = currId st
+          currNodeId = internalIdent (labPref++show max)
+    ; buildCFG stmt 
+    ; st1 <- get
+    ; put st{caseNodes=(caseNodes st)++[(currNodeId, DefaultCase)]}
+    }
 {-
 CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lVars = lVars ++ [x] } }  
 x \not in {v | v \in lVars pred, pred \in preds }
