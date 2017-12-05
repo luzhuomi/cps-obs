@@ -217,7 +217,7 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => 
           currNodeId = internalIdent (labPref++show max)
     ; buildCFG stmt 
     ; st1 <- get
-    ; put st{caseNodes=(caseNodes st)++[(currNodeId, ExpCase exp)]}
+    ; put st1{caseNodes=(caseNodes st1)++[(currNodeId, ExpCase exp)]}
     }
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
@@ -232,7 +232,7 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- default: stmt =>
           currNodeId = internalIdent (labPref++show max)
     ; buildCFG stmt 
     ; st1 <- get
-    ; put st{caseNodes=(caseNodes st)++[(currNodeId, DefaultCase)]}
+    ; put st1{caseNodes=(caseNodes st1)++[(currNodeId, DefaultCase)]}
     }
 {-
 CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lVars = lVars ++ [x] } }  
