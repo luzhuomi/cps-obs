@@ -22,7 +22,7 @@ main :: IO ()
 main = do 
   { let opts = []
   ; args <- getArgs
-  ; let (src:dest:_) = args
+  ; let (src:dest:opts) = args
   ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts src
   ; case ast of 
     { AST.CTranslUnit defs nodeInfo -> do 
