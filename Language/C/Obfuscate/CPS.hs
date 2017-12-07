@@ -480,8 +480,14 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } els
         exp' = cps_trans_exp ctxtName exp
     in [AST.CBlockStmt (AST.CIf exp' trueStmt' mbFalseStmt' nodeInfo)]
 
+cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CCompound ids stmts nodeInfo)) = 
+  -- todo: do we need to do anything with the ids (local labels)?
+  let stmts' = cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmts
+  in [AST.CBlockStmt (AST.CCompound ids stmts' nodeInfo)]
+  
 
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmt = error "cps_trans_stmt error: unhandled case"
+cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmt = 
+  error ("cps_trans_stmt error: unhandled case" ++ (show stmt)) -- (render $ pretty stmt))
      
 
 

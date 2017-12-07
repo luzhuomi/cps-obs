@@ -302,7 +302,8 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
     }
     
   buildCFG (AST.CExpr Nothing nodeInfo) = do 
-    fail $ (posFromNodeInfo nodeInfo) ++ " empty expression stmt not supported." 
+    -- fail $ (posFromNodeInfo nodeInfo) ++ " empty expression stmt not supported." 
+    return () -- todo: check
   
 {-  
 CFG, max, preds, continuable |- stmt1 => CFG1, max1, preds1, continuable1

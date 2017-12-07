@@ -22,6 +22,9 @@ import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 
+-- todo:
+-- check update Exp, where var id is nested deep inside a lval exp.
+
 -- ^ top level function
 -- rename variables in block items and generate function scope declarations
 renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo], [Ident])
@@ -413,8 +416,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   update (AST.CIndex e i nodeInfo) = do 
     { e' <- update e
     ; i' <- rename i -- i is not updated
-    ; case e of 
-      { (AST.CVar id _) -> do 
+    ; case e of
+      { (AST.CVar id _) -> do  -- todo what if var is nested deep inside
            { (RSt lbl env decls containers) <- get
            ; put (RSt lbl env decls (containers ++ [id]))
            }
@@ -424,7 +427,26 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
-  update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
+  update (AST.CMember e i isDeRef nodeInfo) = do 
+    { e' <- update e
+    ; case e of
+      { (AST.CVar id _) -> do 
+           { (RSt lbl env decls containers) <- get
+           ; put (RSt lbl env decls (containers ++ [id]))
+           }
+      ; _ -> return ()
+      }
+    ; return (AST.CMember e' i isDeRef nodeInfo)
+    }
+  update (AST.CCast tydecl e nodeInfo) = do 
+    { e' <- update e
+    ; return (AST.CCast tydecl e' nodeInfo)
+    }
+  update (AST.CUnary op e nodeInfo) = do 
+    { e' <- update e
+    ; return (AST.CUnary op e' nodeInfo)
+    }
+  update exp = error $ "can't update expression" ++ {- (show exp) -} (render $ pretty exp) -- todo AST.CMember 
   
   
                                  

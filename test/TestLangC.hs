@@ -19,8 +19,8 @@ main = do
   let (opts,input_file) = (init args, last args)
   ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts input_file
   -- ast <- errorOnLeftM "Parse Error" $ parseCFilePre input_file
-  --- putStrLn (render $ pretty ast)
-  putStrLn (show ast)
+  putStrLn (render $ pretty ast)
+  -- putStrLn (show ast)
 
 errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
 errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
