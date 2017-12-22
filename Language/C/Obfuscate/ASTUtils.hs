@@ -32,6 +32,9 @@ getFormalArgsFromDerivedDeclarator (AST.CFunDeclr either_old_new attrs nodeInfo)
    { Left idents -> [] -- todo: check what the old style is like?
    ; Right (declarations, flag) -> declarations --  concatMap getFormalArg declarations
    }
+getFormalArgsFromDerivedDeclarator (AST.CPtrDeclr typeQuals nodeInfo) = []
+getFormalArgsFromDerivedDeclarator (AST.CArrDeclr typeQuals arraySize nodeInfo) = []
+-- getFormalArgsFromDerivedDeclarator e = error $ "unhandled derived declarator " ++ show e  
 
 
 getFormalArgIds :: (AST.CDeclaration N.NodeInfo) -> [Ident]

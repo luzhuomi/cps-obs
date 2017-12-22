@@ -193,6 +193,8 @@ CFG1 = CFG \update { pred : { succ = l } } \union { l : { stmts = goto max; }
 CFG1, max, {l}, false |- stmt => CFG2, max2, preds, continuable
 ------------------------------------------------------------------------------
 CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
+
+
 -}
   buildCFG (AST.CLabel label stmt attrs nodeInfo) = do 
     { st <- get 
@@ -200,8 +202,7 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
           currNodeId = internalIdent (labPref++show max)
           cfg0       = cfg st 
           preds0     = currPreds st
-          cfgNode    = Node [AST.CBlockStmt $ 
-                             AST.CLabel label (AST.CGoto currNodeId nodeInfo) attrs nodeInfo] [] [] [] preds0 [] Neither
+          cfgNode    = Node [AST.CBlockStmt $ (AST.CGoto currNodeId nodeInfo) ] [] [] [] preds0 [] Neither  -- todo attrs are lost
           cfg1       = M.insert label cfgNode $ 
                        foldl (\g pred -> M.update (\n -> Just n{succs = [label]}) pred g) cfg0 preds0
     ; put st{cfg = cfg1, currPreds=[label], continuable = False}

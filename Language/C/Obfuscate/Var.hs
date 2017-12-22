@@ -461,7 +461,12 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     { e' <- update e
     ; return (AST.CUnary op e' nodeInfo)
     }
-  update exp = error $ "can't update expression" ++ {- (show exp) -} (render $ pretty exp) -- todo AST.CMember 
+  update (AST.CCall f e nodeInfo) = do 
+    { f' <- update f
+    ; e' <- update e
+    ; return (AST.CCall f' e' nodeInfo)
+    }
+  update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
   
   
                                  
