@@ -463,7 +463,7 @@ buildSSA cfg =
                                                                      ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) -> 
                                                                             let (Just def_lbl) = def  
                                                                             in (var, var `app` def_lbl)
-                                                                                  | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition"
+                                                                                  | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition " ++ (show (def:defs)) ++ " " ++ (show currLbl) ++ "\n" ++ (show cfg)
                                                                      }
                                                               }) rvarsNotLocal)
                                      }

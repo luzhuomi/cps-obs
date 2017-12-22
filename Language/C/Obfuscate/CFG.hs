@@ -76,7 +76,8 @@ data Node = Node { stmts   :: [AST.CCompoundBlockItem N.NodeInfo] -- ^ a compoun
 
 instance Show Node where
   show (Node stmts lhs rhs local_decls preds succs loop) = 
-    "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n succs: " 
+    "\n Node = (stmts: " ++ (show (map (render . pretty) stmts)) ++ "\n preds: " 
+    ++ (show preds) ++ "\n succs: " 
     ++ (show succs) ++  "\n lVars: " ++ (show lhs) ++ "\n rVars: " ++ (show rhs) ++  "\n localDecls: " ++ (show local_decls) ++ ")\n"
 
 type NodeId = Ident
@@ -376,8 +377,8 @@ max1 = max + 1
 CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else if (exp == e2) { goto l2; } ... else { goto ldefault; } } },
                                                                 succs = {l1,l2,...,ldefault}, preds = preds }
 CFG1, max1, {max}, false, {}, contNodes, {} |- stmt1,..., stmtn => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,e1),...,(l_default, _)} 
-CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in dom(CFG2) - dom(CFG1) and preds(l) \intersect breakNodes2 != {} } 
-             \update { { l : { preds = preds \union {max} } | l \in dom(CFG2) - dom(CFG1) and preds(l) \intersect breakNodes2 == {} } 
+CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 != {} } 
+             \update { { l : { preds = preds \union {max} } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 == {} } 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2', max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
 -}
@@ -406,7 +407,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
           cfg2 = cfg st1
           breakNodes2 = breakNodes st1
           caseNodes2 = caseNodes st1
-          newLabs    = cfg2 `M.difference` cfg1
+          newLabs    = (M.fromList caseNodes2) -- cfg2 `M.difference` cfg1
           newLabsWBreaks = newLabs `M.intersection` (M.fromList (zip breakNodes2 (repeat ())))
           newLabsWoBreaks = newLabs `M.difference` (M.fromList (zip breakNodes2 (repeat ())))
           cfg2' = foldl (\g l -> M.update (\n -> Just n{preds = [currNodeId]}) l g) cfg2 (map fst $ M.toList newLabsWBreaks)
