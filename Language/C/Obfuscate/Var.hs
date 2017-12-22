@@ -111,10 +111,25 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
   
 instance Renamable (AST.CStatement N.NodeInfo) where
   rename stmt = case stmt of 
-    { AST.CLabel lbl stmt _ _       -> error "can't rename label stmt"
-    ; AST.CCase exp stmt _          -> error "can't rename case statement"
-    ; AST.CCases lower upper stmt _ -> error "can't rename case statement"
-    ; AST.CDefault stmt _           -> error "can't rename default statement"
+    { AST.CLabel lbl stmt attrs nodeInfo -> do 
+         { stmt' <- rename stmt
+         ; return (AST.CLabel lbl stmt' attrs nodeInfo) 
+         }
+    ; AST.CCase exp stmt nodeInfo   -> do 
+         { exp' <- rename exp
+         ; stmt' <- rename stmt
+         ; return (AST.CCase exp' stmt' nodeInfo)
+         }
+    ; AST.CCases lower upper stmt nodeInfo -> do 
+         { lower' <- rename lower
+         ; upper' <- rename upper
+         ; stmt'  <- rename stmt
+         ; return (AST.CCases lower' upper' stmt' nodeInfo)
+         }
+    ; AST.CDefault stmt nodeInfo    -> do 
+         { stmt' <- rename stmt
+         ; return (AST.CDefault stmt' nodeInfo) 
+         }
     ; AST.CExpr exp nodeInfo        -> 
       case exp of 
         { Nothing -> return (AST.CExpr Nothing nodeInfo)
