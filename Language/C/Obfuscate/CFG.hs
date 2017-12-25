@@ -683,8 +683,7 @@ CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {ty x
 --------------------------------------------------------
 CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false 
 -}
-  
-  buildCFG (AST.CDecl specs divs nodeInfo) = do 
+  buildCFG (AST.CDecl specs divs@[div] nodeInfo) = do 
     { st <- get
     ; if (continuable st) 
       then         
@@ -716,6 +715,10 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
         in do 
           {  put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
+  buildCFG (AST.CDecl specs [] nodeInfo) = return ()    
+  -- breaking  int i, j; into int i; and int j;
+  buildCFG (AST.CDecl specs divs nodeInfo) = 
+    mapM_ buildCFG $ (map (\d -> AST.CDecl specs [d] nodeInfo) divs)
   {-
   buildCFG (AST.CStaticAssert expr str nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ "static assert decl not supported."
