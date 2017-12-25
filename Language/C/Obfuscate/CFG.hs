@@ -527,7 +527,7 @@ CFG, max, preds, true |- goto L => CFG1, max, [] , false
 
 
 max1 = max + 1
-CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L } } 
+CFG1 = CFG \update { pred : {succ = max} |  pred <- preds } \union { max : {stmts = goto L, succ= {L} } } 
 --------------------------------------------------------
 CFG, max, preds, false |- goto L => CFG1, max1, [], false 
 -}
@@ -549,7 +549,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
             cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CGoto ident nodeInfo
-            cfgNode    = Node [s] [] [] [] preds0 [] Neither
+            cfgNode    = Node [s] [] [] [] preds0 [ident] Neither
             cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
@@ -906,6 +906,29 @@ insertGotos cfg =
       removeLast [] = []
       removeLast xs = init xs
 
+      updatePreds :: CFG -> CFG
+      -- add the missing preds caused by the 'manual goto' defined by in the orig source code
+      updatePreds cfg = 
+        foldl (\g (l,node) ->
+                let ss = stmts node
+                in if endsWithGoto ss
+                   then 
+                     -- it has the goto from the orig src, we need to 
+                     -- update the preds in the target
+                     case (last ss) of 
+                       { AST.CBlockStmt (AST.CGoto succ _) -> 
+                            case lookupCFG succ g of 
+                              { Nothing -> g
+                              ; Just node' -> 
+                                M.update (\n -> Just n{preds = 
+                                                          if not (l `elem` (preds n)) 
+                                                          then (preds n) ++ [l]
+                                                          else preds n}) succ g
+                              }
+                       ; _ -> g
+                       }
+                   else g) cfg (M.toList cfg)
+
       insertGT :: Node -> Node 
       insertGT node | containsIf (stmts node) = node
                     | endsWithGoto (stmts node) = node
@@ -928,7 +951,7 @@ insertGotos cfg =
                         let gt = AST.CBlockStmt (AST.CGoto succ N.undefNode)
                         in node{stmts=(stmts node) ++ [gt]}
                       }
-  in M.map insertGT cfg
+  in M.map insertGT (updatePreds cfg)
 
 -- TODO:
 -- I am trying to inject the formal arguments into the blk 0 as declaration so that

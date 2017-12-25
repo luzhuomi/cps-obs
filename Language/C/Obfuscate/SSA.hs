@@ -305,11 +305,24 @@ dfplus ids dft =
              
 -- ^ phiLoc given a variable, identify the list of labelled block in SSA to insert the phi
 phiLoc :: Ident -> CFG -> DFTable -> [Ident]             
+{-
+-- this does not work, once a phi is created, a new modded loc is also introduced
 phiLoc var cfg dft = 
   let modded = modLoc var cfg
   in S.toList (dfplus (S.fromList modded) dft)
-      
-                     
+-}                
+phiLoc var cfg dft = 
+  let modded = modLoc var cfg
+      go :: S.Set Ident -> S.Set Ident -> DFTable -> S.Set Ident
+      go modded curr_phiLocs dft = 
+        let next_phiLocs = dfplus modded dft
+        in if next_phiLocs `S.isSubsetOf` curr_phiLocs 
+           then curr_phiLocs
+           else go (modded `S.union` next_phiLocs) (curr_phiLocs `S.union` next_phiLocs) dft
+  in S.toList (go (S.fromList modded) S.empty dft)
+
+
+
 -- ^ retrieve the blocks from a CFG where a variable is being modified.
 modLoc :: Ident -> CFG -> [Ident]                      
 modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lVars node)) (M.toList cfg))
@@ -463,7 +476,7 @@ buildSSA cfg =
                                                                      ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) -> 
                                                                             let (Just def_lbl) = def  
                                                                             in (var, var `app` def_lbl)
-                                                                                  | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition " ++ (show (def:defs)) ++ " " ++ (show currLbl) ++ "\n" ++ (show cfg)
+                                                                                  | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition " ++ (show (def:defs)) ++ "\n current Label " ++ (show currLbl) ++ "\n CFG" ++ (show cfg) ++ "\n Phi loca Map" ++ (show phiLocMap) ++ "\n DFT" ++ (show dft)
                                                                      }
                                                               }) rvarsNotLocal)
                                      }
