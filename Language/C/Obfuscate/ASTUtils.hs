@@ -10,8 +10,25 @@ import Language.C.Data.Ident
 import Language.C.Obfuscate.Var
 
 -- some AST boilerplate to extract parts from the function declaration
-getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo]
-getFunReturnTy (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = tySpecfs 
+getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo] -- todo retrieve the pointers from declarator
+getFunReturnTy (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
+  filter (\tySpecf -> isTypeSpec tySpecf) tySpecfs 
+  -- todo retrieve the pointers from declarator
+
+isTypeSpec :: AST.CDeclarationSpecifier N.NodeInfo -> Bool
+isTypeSpec (AST.CTypeSpec _) = True
+isTypeSpec _ = False
+
+
+
+isInlineFun :: AST.CFunctionDef N.NodeInfo -> Bool
+isInlineFun (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
+  any isInlineTyQual tySpecfs
+  
+isInlineTyQual :: AST.CDeclarationSpecifier N.NodeInfo -> Bool 
+isInlineTyQual (AST.CTypeQual (AST.CInlineQual _)) = True
+isInlineTyQual _ = False
+
 
 getFunName :: (AST.CFunctionDef N.NodeInfo) -> Maybe String
 getFunName (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = getDeclrName declarator

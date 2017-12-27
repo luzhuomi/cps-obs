@@ -28,7 +28,7 @@ main = do
     { AST.CTranslUnit defs nodeInfo -> do 
          { writeFile dest ""
          ; mapM_ (\def -> case def of 
-                     { AST.CFDefExt fundef | not (isMain fundef) -> 
+                     { AST.CFDefExt fundef | not (isMain fundef) && not (isInlineFun fundef) -> 
                           case runCFG fundef of
                             { CFGOk (_, state) -> do 
                                  { let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
