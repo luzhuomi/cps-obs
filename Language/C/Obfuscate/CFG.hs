@@ -93,6 +93,7 @@ data StateInfo = StateInfo { currId :: Int
                            , contNodes :: [NodeId]
                            , breakNodes :: [NodeId]
                            , caseNodes :: [(NodeId, CaseExp)] -- case node
+                           , formalArgs :: [Ident] -- formal arguments
                            } deriving Show
                  
 -- instance Show StateInfo where                 
@@ -106,7 +107,7 @@ labPref :: String
 labPref = "myLabel"
 
 
-initStateInfo = StateInfo 0 M.empty [] False [] [] []
+initStateInfo = StateInfo 0 M.empty [] False [] [] [] []
 
 
 
@@ -179,7 +180,8 @@ instance CProg (AST.CFunctionDef N.NodeInfo)  where
     { buildCFG stmt 
     ; st <- get
     ; let fargs = concatMap getFormalArgIds (getFormalArgsFromDeclarator declarator)
-    ; put st{cfg = formalArgsAsDecls fargs (insertGotos (cfg st))}
+    ; put st{ cfg = formalArgsAsDecls fargs (insertGotos (cfg st))
+            , formalArgs = fargs}
     ; return ()
     }
   

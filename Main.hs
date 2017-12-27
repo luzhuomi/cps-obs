@@ -31,10 +31,10 @@ main = do
                      { AST.CFDefExt fundef | not (isMain fundef) && not (isInlineFun fundef) -> 
                           case runCFG fundef of
                             { CFGOk (_, state) -> do 
-                                 { let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
+                                 { let ssa@(SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state) (formalArgs state)
                                        visitors = allVisitors sdom labelledBlocks
                                        exits    = allExits labelledBlocks
-                                       cps = ssa2cps fundef (buildSSA (cfg state))
+                                       cps = ssa2cps fundef ssa 
                                  ; appendFile dest (prettyCPS cps) 
                                  ; appendFile dest "\n"
                                  }

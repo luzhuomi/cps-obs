@@ -36,7 +36,7 @@ testSSA = do
            { CFGOk (_, state) -> do 
                 { putStrLn $ show $ buildDTree (cfg state)
                 ; putStrLn $ show $ buildDF (cfg state)
-                ; putStrLn $ show $ buildSSA (cfg state)
+                ; putStrLn $ show $ buildSSA (cfg state) (formalArgs state)
                 }
            ; CFGError s       -> error s
            }
@@ -382,8 +382,8 @@ prettySSA ssa = "scope_decls :" ++ (render $ pretty (scoped_decls ssa)) ++ "\n" 
 
 -- TODO : incorporating the formal args as allVars
 
-buildSSA :: CFG -> SSA
-buildSSA cfg = 
+buildSSA :: CFG -> [Ident] -> SSA
+buildSSA cfg fargs = 
   case buildDTree cfg of 
     { Nothing  -> error "failed to build dominance frontier table"
     ; Just (dtree, pcm, sdom) -> 

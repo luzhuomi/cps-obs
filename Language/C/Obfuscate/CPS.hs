@@ -37,13 +37,13 @@ testCPS = do
            { CFGOk (_, state) -> do 
                 { -- putStrLn $ show $ buildDTree (cfg state)
                 ; -- putStrLn $ show $ buildDF (cfg state)
-                ; let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state)
+                ; let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state) (formalArgs state)
                       visitors = allVisitors sdom labelledBlocks
                       exits    = allExits labelledBlocks
                 -- ; putStrLn $ show $ visitors
                 -- ; putStrLn $ show $ exits                  
 
-                ; let cps = ssa2cps fundef (buildSSA (cfg state))
+                ; let cps = ssa2cps fundef (buildSSA (cfg state) (formalArgs state))
                 ; putStrLn $ prettyCPS $ cps
                 ; -- putStrLn $ render $ pretty (cps_ctxt cps)
                 ; -- mapM_  (\d -> putStrLn $ render $ pretty d) (cps_funcsigs cps)
