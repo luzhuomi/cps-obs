@@ -26,7 +26,7 @@ isInlineFun (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) =
   any isInlineTyQual tySpecfs
   
 isInlineTyQual :: AST.CDeclarationSpecifier N.NodeInfo -> Bool 
-isInlineTyQual (AST.CTypeQual (AST.CInlineQual _)) = True
+isInlineTyQual (AST.CFunSpec (AST.CInlineQual _)) = True
 isInlineTyQual _ = False
 
 
