@@ -10,9 +10,21 @@ import Language.C.Data.Ident
 import Language.C.Obfuscate.Var
 
 -- some AST boilerplate to extract parts from the function declaration
-getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> [AST.CDeclarationSpecifier N.NodeInfo] -- todo retrieve the pointers from declarator
+getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> 
+                  ([AST.CDeclarationSpecifier N.NodeInfo], [AST.CDerivedDeclarator N.NodeInfo]) -- todo retrieve the pointers from declarator
 getFunReturnTy (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
-  filter (\tySpecf -> isTypeSpec tySpecf) tySpecfs 
+  let ty = filter (\tySpecf -> isTypeSpec tySpecf) tySpecfs 
+      pointer_or_arrs = case declarator of 
+        { AST.CDeclr mb_ident derivedDeclarators mb_strLit attrs nodeInfo' -> 
+             filter (\derivedDeclarator -> not (isFunDeclr derivedDeclarator)) derivedDeclarators
+        ; _ -> [] 
+        }
+  in (ty, pointer_or_arrs)
+                 
+isFunDeclr :: AST.CDerivedDeclarator N.NodeInfo -> Bool
+isFunDeclr (AST.CFunDeclr _ _ _) = True
+isFunDeclr _ = False
+
   -- todo retrieve the pointers from declarator
 
 isTypeSpec :: AST.CDeclarationSpecifier N.NodeInfo -> Bool

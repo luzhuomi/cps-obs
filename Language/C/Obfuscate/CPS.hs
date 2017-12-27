@@ -589,12 +589,12 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       formalArgDecls = getFormalArgs fundef
       formalArgIds :: [Ident]
       formalArgIds   = concatMap (\declaration -> getFormalArgIds declaration) formalArgDecls
-      returnTy       = getFunReturnTy fundef
-      isReturnVoid   = isVoidDeclSpec returnTy
-      ctxtStructName = funName ++ "Ctxt"
+      (returnTy,ptrArrs) = getFunReturnTy fundef
+      isReturnVoid       = isVoidDeclSpec returnTy
+      ctxtStructName     = funName ++ "Ctxt"
       
       -- the context struct declaration
-      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy
+      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy ptrArrs
       ctxtName       = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
       
       -- finding the visitor labels and the exit labels
@@ -867,8 +867,9 @@ mkContext :: String -> -- ^ context name
              [AST.CDeclaration N.NodeInfo] ->  -- ^ formal arguments
              [AST.CDeclaration N.NodeInfo] ->  -- ^ local variable declarations
              [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return Type
+             [AST.CDerivedDeclarator N.NodeInfo] -> -- ^ the pointer or array postfix
              AST.CDeclaration N.NodeInfo
-mkContext name labeledBlocks formal_arg_decls local_var_decls returnType  = 
+mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs = 
   let structName  = iid name
       ctxtAlias   = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs       = []
@@ -891,7 +892,7 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType  =
       exitStack    = binaryFuncStack "loop_exits"
       currStackSize = AST.CDecl [AST.CTypeSpec intTy] [(Just (AST.CDeclr (Just $ iid currStackSizeName) [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
       funcResult | isReturnVoid = [] 
-                 | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") [] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
+                 | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
                       concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks) (map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
                       [ksStack, condStack, visitorStack, exitStack, currStackSize] ++ funcResult
