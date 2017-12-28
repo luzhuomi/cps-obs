@@ -388,7 +388,8 @@ buildSSA cfg fargs =
     { Nothing  -> error "failed to build dominance frontier table"
     ; Just (dtree, pcm, sdom) ->
       let dft = buildDF' (dtree, pcm, sdom, cfg)
-          localVars = allVars cfg -- all vars include formal arguments
+          allVarsUsed = allVars cfg -- all vars used in this function, local declared, formal args and global 
+          allLocalVars = S.fromList (localDeclaredVars cfg) -- all locally declared vars in this function
           -- build a mapping from node label to a
           -- set of variables that need to be merged via phi func
           -- (note: variables are not yet renamed)
@@ -398,7 +399,7 @@ buildSSA cfg fargs =
                                 { Nothing -> M.insert label [v] m
                                 ; Just vs -> M.update (\_ -> Just $ vs ++ [v]) label m
                                 }) M.empty $ do
-            { var <- localVars
+            { var <- allVarsUsed -- todo: shall we exclude global vars?
             ; let phiLocs = phiLoc var cfg dft
             ; phiLoc <- phiLocs
             ; return (phiLoc, var)
@@ -417,11 +418,15 @@ buildSSA cfg fargs =
                      ; Just node | var `elem` (lVars node) ->  Just currLbl
                      ; Just _ | otherwise ->
                        case parentOf currLbl dt of
-                         { Nothing -> -- no parent: this is block 0
-                              -- this could be due to a nested scope var in some inner block of if else or while.
-                              -- we will move it to block 0 (the init block)
-                              -- e.g. refer to the fibiter.c, the variable t
-                              Just currLbl -- this make sense for block 0, all local variables should be lifted and declared in block 0
+                         { Nothing | (var `S.member` formalArguments) ||  
+                                     (var `S.member` allLocalVars)
+                                     -> -- no parent: this is block 0
+                                       Just currLbl
+                                       -- this could be due to a nested scope var in some inner block of if else or while.
+                                       -- we will move it to block 0 (the init block)
+                                       -- e.g. refer to the fibiter.c, the variable t
+                                       -- this make sense for block 0, all local variables should be lifted and declared in block 0
+                                   | otherwise -> Nothing -- as this is to be decided later, it could be a global var
                          ; Just parentLbl -> precDef parentLbl var dt cfg
                          }
                      }
@@ -457,7 +462,8 @@ buildSSA cfg fargs =
                                    rnEnv = case precLbls of
                                      { [] -> -- entry block -- todo: check, shouldn't be the formal arg?
                                           M.fromList (map (\var ->
-                                                            if var `S.member` formalArguments
+                                                            if (var `S.member` formalArguments) ||  
+                                                               (var `S.member` allLocalVars)
                                                             then (var, var `app` currLbl)
                                                             else (var, var) -- global
                                                           ) rvarsNotLocal)
@@ -466,7 +472,8 @@ buildSSA cfg fargs =
                                                               case precDef precLbl var dtree cfg of
                                                                 { Just def_lbl -> (var, var `app` def_lbl)
                                                                 ; Nothing      -> -- it is a formal arg and should be redefined in block 0
-                                                                     if var `S.member` formalArguments
+                                                                     if (var `S.member` formalArguments) ||  
+                                                                        (var `S.member` allLocalVars)
                                                                      then (var, var `app` (iid (labPref ++ "0")))
                                                                      else (var, var) -- global
                                                                 }) rvarsNotLocal)
@@ -535,3 +542,8 @@ buildSSA cfg fargs =
 
 allVars :: CFG -> [Ident]
 allVars cfg = S.toList (S.fromList (concatMap (\(i,n) -> lVars n ++ rVars n) (M.toList cfg)))
+
+
+localDeclaredVars :: CFG -> [Ident]
+localDeclaredVars cfg =  
+  S.toList (S.fromList (concatMap (\(i,n) -> localDecls n) (M.toList cfg)))
