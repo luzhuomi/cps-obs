@@ -486,9 +486,10 @@ buildSSA cfg fargs =
 
                                                                    -- updated: the above is not true, look at sort example, var j in node 7. (7 has preds 4 and 6, both do not redefine j,
                                                                    -- node 4 & 6 share a common ancestor 3 where j is redefined
-                                                                   case map (\precLbl -> precDef precLbl var dtree cfg) precLbls of
-                                                                     { [] -> error "impossible"
-                                                                     ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) ->
+                                                                   case filter isJust $ map (\precLbl -> precDef precLbl var dtree cfg) precLbls of
+                                                                     { [] -> -- var is global
+                                                                          (var, var)
+                                                                     ; (def:defs) | all (\d -> d == def) defs ->
                                                                             let (Just def_lbl) = def
                                                                             in (var, var `app` def_lbl)
                                                                                   | otherwise -> error $ "buildSSA: rnState variable " ++ (show var) ++ " has a conflicting preceding definition " ++ (show (def:defs)) ++ "\n current Label " ++ (show currLbl) ++ "\n CFG" ++ (show cfg) ++ "\n Phi loca Map" ++ (show phiLocMap) ++ "\n DFT" ++ (show dft)
