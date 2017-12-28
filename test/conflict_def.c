@@ -1,4 +1,20 @@
+static void
+ast_error_finish(const char *filename)
+{
+    PyObject *type, *value, *tback, *errstr, *loc, *tmp;
+    long lineno;
+    loc = PyErr_ProgramText(filename, lineno);
+    if (!loc) {
+        Py_INCREF(Py_None);
+        loc = Py_None;
+    }
+    tmp = Py_BuildValue("(zlOO)", filename, lineno, Py_None, loc);
+    PyErr_Restore(type, value, tback);
+}
 
+
+
+/*
 int f(int n) {
   int i, l; // 0
   switch (n) { // 1
@@ -33,7 +49,7 @@ int g(x) {
  onError:   // onError
   return 0; // 11
 }
-
+*/
 
 // question, why v in not in phi of 10?
 /* 
