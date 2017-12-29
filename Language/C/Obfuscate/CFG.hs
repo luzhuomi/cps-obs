@@ -317,10 +317,25 @@ CFGn-1, maxn-1, predsn-1, continuablen-1 |- stmtn => CFGn, maxn, predsn, continu
 ---------------------------------------------------------------------------
 CFG, max, preds, continuable |- { stmt1, ..., stmtN } => CFG', max', preds', continuable' 
 -}
-  buildCFG (AST.CCompound localLabels blockItems nodeInfo) = do 
-    { mapM_ buildCFG blockItems
-    ; return ()
-    }
+  buildCFG (AST.CCompound localLabels blockItems nodeInfo)
+    | null blockItems = do -- for empty { } we need to create an empty node
+        { st <- get
+        ; let max        = currId st
+              currNodeId = internalIdent (labPref++show max)          
+              lhs        = []
+              rhs        = []
+              max1       = max + 1
+              cfg0       = cfg st 
+              preds0     = currPreds st
+              cfgNode    = Node [] lhs rhs [] preds0 [] Neither
+              cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+              cfg1       = M.insert currNodeId cfgNode cfg1'
+        ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
+        }
+    | otherwise = do 
+        { mapM_ buildCFG blockItems
+        ; return ()
+        }
 
   buildCFG (AST.CIf exp trueStmt mbFalseStmt nodeInfo) = 
     case mbFalseStmt of 
