@@ -566,7 +566,7 @@ cps_trans_exp localVars fargs ctxtName (AST.CAlignofType decl nodeInfo) = AST.CA
 cps_trans_exp localVars fargs ctxtName (AST.CComplexReal e nodeInfo)    = AST.CComplexReal (cps_trans_exp localVars fargs ctxtName e) nodeInfo
 cps_trans_exp localVars fargs ctxtName (AST.CComplexImag e nodeInfo)    = AST.CComplexImag (cps_trans_exp localVars fargs ctxtName e) nodeInfo
 cps_trans_exp localVars fargs ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CIndex (cps_trans_exp localVars fargs ctxtName arr) (cps_trans_exp localVars fargs ctxtName idx) nodeInfo
-cps_trans_exp localVars fargs ctxtName (AST.CCall f args nodeInfo)      = AST.CCall {- (cps_trans_exp ctxtName f) -} f (map (cps_trans_exp localVars fargs ctxtName) args) nodeInfo -- NOTE: we never add function id into the ctxt, function ids are immutable
+cps_trans_exp localVars fargs ctxtName (AST.CCall f args nodeInfo)      = AST.CCall (cps_trans_exp localVars fargs ctxtName f) (map (cps_trans_exp localVars fargs ctxtName) args) nodeInfo 
 cps_trans_exp localVars fargs ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp localVars fargs ctxtName e) ident deref nodeInfo
 cps_trans_exp localVars fargs ctxtName (AST.CVar id _) =  
   case unApp id ('_':labPref) of
