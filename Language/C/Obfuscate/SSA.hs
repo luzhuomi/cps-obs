@@ -504,6 +504,7 @@ buildSSA cfg fargs =
                      renamedBlkItems_decls_containers = renamePure rnState statements
                      (renamedBlkItems, new_decls, containers) = renamedBlkItems_decls_containers
                      -- scalar copy for container variables eg. say a[] then a[i] = a[j] --> a_2 = a_1; a_2[i_2] = a_1[j_2];
+                     -- and insert them to the begining of the labeled block
                      scalar_copy :: [Ident] -> [AST.CCompoundBlockItem N.NodeInfo]
                      scalar_copy containers =
                        concatMap (\container -> -- lookup the last def of container variable, similar to building rnState

@@ -314,7 +314,8 @@ instance Renamable Ident where
     }      
   update ident = do 
     { RSt lbl env decls containers local_decl_vars fargs <- get
-    ; let renamed = ident `app` lbl
+    ; let renamed | ident `S.member` (local_decl_vars `S.union` fargs) = ident `app` lbl
+                  | otherwise = ident
           env'    = upsert ident renamed env
     ; put (RSt lbl env' decls containers local_decl_vars fargs)
     ; return renamed
@@ -435,26 +436,18 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   update (AST.CIndex e i nodeInfo) = do 
     { e' <- update e
     ; i' <- rename i -- i is not updated
-    ; case e of
-      { (AST.CVar id _) -> do  -- todo what if var is nested deep inside
-           { (RSt lbl env decls containers local_decl_vars fargs) <- get
-           ; put (RSt lbl env decls (containers ++ [id]) local_decl_vars fargs)
-           }
-      ; _ -> return ()
-      }
+    ; let containerIDs =  getContainerIDs e
+    ; (RSt lbl env decls containers local_decl_vars fargs) <- get
+    ; put (RSt lbl env decls (containers ++ containerIDs) local_decl_vars fargs)
     ; return (AST.CIndex e' i' nodeInfo)
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
   update (AST.CMember e i isDeRef nodeInfo) = do 
     { e' <- update e
-    ; case e of
-      { (AST.CVar id _) -> do 
-           { (RSt lbl env decls containers local_decl_vars fargs) <- get
-           ; put (RSt lbl env decls (containers ++ [id]) local_decl_vars fargs)
-           }
-      ; _ -> return ()
-      }
+    ; let containerIDs =  getContainerIDs e
+    ; (RSt lbl env decls containers local_decl_vars fargs) <- get
+    ; put (RSt lbl env decls (containers ++ containerIDs) local_decl_vars fargs)
     ; return (AST.CMember e' i isDeRef nodeInfo)
     }
   update (AST.CCast tydecl e nodeInfo) = do 
@@ -472,8 +465,28 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     }
   update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
   
-  
-                                 
+getContainerIDs :: AST.CExpression N.NodeInfo -> [Ident]
+getContainerIDs (AST.CAssign op lval rval _) = getContainerIDs lval
+getContainerIDs (AST.CComma exps _)          = [] -- todo: comma exp as container? 
+getContainerIDs (AST.CCond e1 Nothing e3 _)  = getContainerIDs e3
+getContainerIDs (AST.CCond e1 (Just e2) e3 _) = getContainerIDs e2 ++ getContainerIDs e3
+getContainerIDs (AST.CBinary op e1 e2 _)      = getContainerIDs e1 ++ getContainerIDs e2
+getContainerIDs (AST.CCast ty e _) = getContainerIDs e
+getContainerIDs (AST.CUnary op e _) = getContainerIDs e 
+getContainerIDs (AST.CSizeofExpr e _) = []
+getContainerIDs (AST.CSizeofType t _) = []
+getContainerIDs (AST.CAlignofExpr e _) = [] -- e of alignof must be constant in C
+getContainerIDs (AST.CAlignofType t _) = []
+getContainerIDs (AST.CComplexReal e _) = []
+getContainerIDs (AST.CComplexImag e _) = []
+getContainerIDs (AST.CIndex a e _) = getContainerIDs a
+getContainerIDs (AST.CCall f args _) = getContainerIDs f
+getContainerIDs (AST.CMember e i _ _ ) = getContainerIDs e
+getContainerIDs (AST.CVar id _) = [id]
+getContainerIDs (AST.CConst _) = []
+getContainerIDs (AST.CStatExpr stmt _) = []
+getContainerIDs (AST.CLabAddrExpr id _) = []
+getContainerIDs (AST.CBuiltinExpr bi) = []
 
 -- append two identifiers with _
 app :: Ident -> Ident -> Ident
