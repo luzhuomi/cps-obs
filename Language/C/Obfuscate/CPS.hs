@@ -363,7 +363,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
              args    = [ cvar k
                        , cvar (iid ctxtParamName) ] 
              funcall = case M.lookup ident visitors of -- in case it is the last block of descending from the loop-if then branch, we call (*k)(ctxt) instead
-               { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar k) [cvar (iid ctxtName)] N.undefNode)) N.undefNode) 
+               { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar k) [cvar (iid ctxtParamName)] N.undefNode)) N.undefNode) 
                ; _ -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
                }
          in [ funcall ]
