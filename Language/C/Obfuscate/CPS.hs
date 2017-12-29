@@ -3,6 +3,7 @@ module Language.C.Obfuscate.CPS
        where
 import Data.Char
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -19,6 +20,9 @@ import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
+
+import System.IO.Unsafe (unsafePerformIO)
+
 
 -- TODO LIST:
 -- 1. check whether k vs kParam (done)
@@ -37,7 +41,7 @@ testCPS = do
            { CFGOk (_, state) -> do 
                 { -- putStrLn $ show $ buildDTree (cfg state)
                 ; -- putStrLn $ show $ buildDF (cfg state)
-                ; let (SSA scopedDecls labelledBlocks sdom) = buildSSA (cfg state) (formalArgs state)
+                ; let (SSA scopedDecls labelledBlocks sdom _ _) = buildSSA (cfg state) (formalArgs state)
                       visitors = allVisitors sdom labelledBlocks
                       exits    = allExits labelledBlocks
                 -- ; putStrLn $ show $ visitors
@@ -232,6 +236,8 @@ type Visitors = M.Map Ident Ident -- ^ last label of the visitor -> label of the
 type Exits    = M.Map Ident Ident -- ^ label of the exit -> label of the loop
 
 cps_trans_lbs :: Bool -> -- ^ is return void
+                 S.Set Ident -> -- ^ local vars
+                 S.Set Ident -> -- ^ formal args
                  ContextName -> 
                  Ident ->  -- ^ top level function name
                  -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
@@ -239,13 +245,15 @@ cps_trans_lbs :: Bool -> -- ^ is return void
                  Exits ->                 
                  M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                  [AST.CFunctionDef N.NodeInfo] 
-cps_trans_lbs isReturnVoid ctxtName fname visitors exits lb_map = 
-  map (\(id,lb) -> cps_trans_lb isReturnVoid ctxtName fname lb_map id visitors exits lb) (M.toList lb_map)
+cps_trans_lbs isReturnVoid localVars fargs ctxtName fname visitors exits lb_map = 
+  map (\(id,lb) -> cps_trans_lb isReturnVoid localVars fargs  ctxtName fname lb_map id visitors exits lb) (M.toList lb_map)
 
 {- fn, \bar{\Delta}, \bar{b}  |- b => P -}
 
 
 cps_trans_lb :: Bool -> -- ^ is return void
+                S.Set Ident -> -- ^ local vars
+                S.Set Ident -> -- ^ formal args
                 ContextName -> 
                 Ident ->  -- ^ top level function name
                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
@@ -269,7 +277,7 @@ fn, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k) { 
 -}
 
 
-cps_trans_lb isReturnVoid ctxtName fname lb_map ident visitors exits  lb  = 
+cps_trans_lb isReturnVoid localVars fargs ctxtName fname lb_map ident visitors exits lb  = 
   let fname' = fname `app` ident
       tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
       declrs = []
@@ -289,12 +297,14 @@ cps_trans_lb isReturnVoid ctxtName fname lb_map ident visitors exits  lb  =
       attrs  =  []
       pop   | ident `M.member` exits = [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "pop"))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) ] 
             | otherwise              = []
-      stmt' =  AST.CCompound [] (pop ++ (cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident (lb_loop lb) visitors exits (lb_stmts lb))) N.undefNode      
+      stmt' =  AST.CCompound [] (pop ++ (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident (lb_loop lb) visitors exits (lb_stmts lb))) N.undefNode      
   in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
     
      
      
 cps_trans_stmts :: Bool -> -- ^ is return type void
+                   S.Set Ident -> -- ^ local vars
+                   S.Set Ident -> -- ^ formal args
                    ContextName -> 
                    Ident -> -- ^ fname 
                    Ident -> -- ^ K
@@ -306,13 +316,15 @@ cps_trans_stmts :: Bool -> -- ^ is return type void
                    Exits ->
                    [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
                    [AST.CCompoundBlockItem N.NodeInfo]
-cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmts = -- todo: maybe pattern match the CCompound constructor here?
-  concatMap (\stmt -> cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmt) stmts 
+cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmts = -- todo: maybe pattern match the CCompound constructor here?
+  concatMap (\stmt -> cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmt) stmts 
 
 
 
 -- fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 cps_trans_stmt :: Bool -> -- ^ is return type void
+                  S.Set Ident -> -- ^ local vars
+                  S.Set Ident -> -- ^ formal args
                   ContextName -> 
                   Ident ->  -- ^ fname
                   Ident ->  -- ^ K
@@ -330,7 +342,7 @@ l_i : { \bar{i} ; s } \in \bar{b}   l, l_i |- \bar{i} => x1 = e1; ...; xn =en;
 fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
   { Just lb | not (null (lb_phis lb)) -> 
        let asgmts  = cps_trans_phis ctxtName ident li (lb_phis lb)
            fname'  = fname `app` li
@@ -359,7 +371,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
   }
                                                                                         
 
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
   case e of 
     -- todo: deal with array element assignment, we need to assign the array first. we should do it at the block level
    { AST.CAssign op lval rval ni -> 
@@ -368,7 +380,7 @@ x => X; e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 ----------------------------------------------------------------------------- (SeqAssign)
 fn, K, \bar{\Delta}, \bar{b} |-_l x = e;s => X = E;S
 -}             
-     let e' = cps_trans_exp ctxtName e
+     let e' = cps_trans_exp localVars fargs ctxtName e
      in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
    ; _ -> 
 {-                                                                                        
@@ -376,7 +388,7 @@ e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
 ----------------------------------------------------------------------------- (SeqE)
 fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
 -}     
-     let e' = cps_trans_exp ctxtName e
+     let e' = cps_trans_exp localVars fargs ctxtName e
      in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
    }
 {-
@@ -386,7 +398,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
 -- C does not support higher order function.
 -- K is passed in as a formal arg
 -- K is a pointer to function
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
   let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
   in [ funcall ]
 
@@ -398,19 +410,19 @@ fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
 -- C does not support higher order function.
 -- x_r and K belong to the contxt
 -- K is a pointer to function
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) 
   | isReturnVoid = 
     let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode) 
     in [ funcall ]
   | otherwise = 
       let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
-          e' = cps_trans_exp ctxtName e
+          e' = cps_trans_exp localVars fargs ctxtName e
           assign = ((cvar (iid ctxtParamName)) .->. (iid "func_result")) .=. e' 
       in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
      
 
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta  visitors exits (AST.CBlockStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo)) 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta  visitors exits (AST.CBlockStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo)) 
 {-
 l \in \Delta
 e => E
@@ -424,7 +436,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
 -- for 2, we can perform a check at any l3 where it contains a "goto l;", look up l we find l1 is the true branch visitor
 --        we need to check whether l1 sdom l3, if so, replace "goto l"  by (*k())
   | inDelta = 
-    let exp' = cps_trans_exp ctxtName exp
+    let exp' = cps_trans_exp localVars fargs ctxtName exp
         lbl_tr = case trueStmt of 
           { AST.CGoto lbl _ -> lbl 
           ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
@@ -463,30 +475,30 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } els
 -}  
   | otherwise = 
     let trueStmt'    = case trueStmt of 
-          { AST.CCompound ids items ni -> AST.CCompound ids (cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits items) ni 
-          ; _ -> case cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt trueStmt) of 
+          { AST.CCompound ids items ni -> AST.CCompound ids (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits items) ni 
+          ; _ -> case cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt trueStmt) of 
             { [ AST.CBlockStmt trueStmt'' ] -> trueStmt''
             ; items -> AST.CCompound [] items N.undefNode
             }
           }
         mbFalseStmt' = case mbFalseStmt of 
           { Nothing        -> Nothing 
-          ; Just (AST.CCompound ids items ni) -> Just $ AST.CCompound ids (cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits items) ni   
-          ; Just falseStmt -> Just $ case cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt falseStmt) of 
+          ; Just (AST.CCompound ids items ni) -> Just $ AST.CCompound ids (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits items) ni   
+          ; Just falseStmt -> Just $ case cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt falseStmt) of 
             { [  AST.CBlockStmt falseStmt'' ] -> falseStmt'' 
             ; items -> AST.CCompound [] items N.undefNode
             }
           }
-        exp' = cps_trans_exp ctxtName exp
+        exp' = cps_trans_exp localVars fargs ctxtName exp
     in [AST.CBlockStmt (AST.CIf exp' trueStmt' mbFalseStmt' nodeInfo)]
 
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CCompound ids stmts nodeInfo)) = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CCompound ids stmts nodeInfo)) = 
   -- todo: do we need to do anything with the ids (local labels)?
-  let stmts' = cps_trans_stmts isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmts
+  let stmts' = cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmts
   in [AST.CBlockStmt (AST.CCompound ids stmts' nodeInfo)]
   
 
-cps_trans_stmt isReturnVoid ctxtName fname k lb_map ident inDelta visitors exits stmt = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmt = 
   error ("cps_trans_stmt error: unhandled case" ++ (show stmt)) -- (render $ pretty stmt))
      
 
@@ -539,29 +551,38 @@ cps_trans_phi ctxtName src_lb dest_lb (var, pairs) =
 -}
 -- it seems just to be identical 
 -- for C target, we need to rename x to ctxt->x
-cps_trans_exp :: ContextName -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
-cps_trans_exp ctxtName (AST.CAssign op lhs rhs nodeInfo)    = AST.CAssign op (cps_trans_exp ctxtName lhs) (cps_trans_exp ctxtName rhs) nodeInfo
-cps_trans_exp ctxtName (AST.CComma es nodeInfo)             = AST.CComma (map (cps_trans_exp ctxtName) es) nodeInfo
-cps_trans_exp ctxtName (AST.CCond e1 Nothing e3 nodeInfo)   = AST.CCond (cps_trans_exp ctxtName e1) Nothing (cps_trans_exp ctxtName e3) nodeInfo
-cps_trans_exp ctxtName (AST.CCond e1 (Just e2) e3 nodeInfo) = AST.CCond (cps_trans_exp ctxtName e1) (Just $ cps_trans_exp ctxtName e2) (cps_trans_exp ctxtName e3) nodeInfo
-cps_trans_exp ctxtName (AST.CBinary op e1 e2 nodeInfo)  = AST.CBinary op (cps_trans_exp ctxtName e1)  (cps_trans_exp ctxtName e2) nodeInfo
-cps_trans_exp ctxtName (AST.CCast decl e nodeInfo)      = AST.CCast decl (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CUnary op e nodeInfo)       = AST.CUnary op (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CSizeofExpr e nodeInfo)     = AST.CSizeofExpr (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CSizeofType decl nodeInfo)  = AST.CSizeofType decl nodeInfo
-cps_trans_exp ctxtName (AST.CAlignofExpr e nodeInfo)    = AST.CAlignofExpr (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CAlignofType decl nodeInfo) = AST.CAlignofType decl nodeInfo
-cps_trans_exp ctxtName (AST.CComplexReal e nodeInfo)    = AST.CComplexReal (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CComplexImag e nodeInfo)    = AST.CComplexImag (cps_trans_exp ctxtName e) nodeInfo
-cps_trans_exp ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CIndex (cps_trans_exp ctxtName arr) (cps_trans_exp ctxtName idx) nodeInfo
-cps_trans_exp ctxtName (AST.CCall f args nodeInfo)      = AST.CCall {- (cps_trans_exp ctxtName f) -} f (map (cps_trans_exp ctxtName) args) nodeInfo -- NOTE: we never add function id into the ctxt, function ids are immutable
-cps_trans_exp ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp ctxtName e) ident deref nodeInfo
-cps_trans_exp ctxtName (AST.CVar id _)                      = (cvar (iid ctxtParamName)) .->. id
-cps_trans_exp ctxtName (AST.CConst c)                       = AST.CConst c
-cps_trans_exp ctxtName (AST.CCompoundLit decl initList nodeInfo) = AST.CCompoundLit decl initList nodeInfo -- todo check this
-cps_trans_exp ctxtName (AST.CStatExpr stmt nodeInfo )       = AST.CStatExpr stmt nodeInfo  -- todo GNU C compount statement as expr
-cps_trans_exp ctxtName (AST.CLabAddrExpr ident nodeInfo )   = AST.CLabAddrExpr ident nodeInfo -- todo  
-cps_trans_exp ctxtName (AST.CBuiltinExpr builtin )          = AST.CBuiltinExpr builtin -- todo build in expression
+cps_trans_exp :: S.Set Ident -> S.Set Ident -> ContextName -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CAssign op lhs rhs nodeInfo)    = AST.CAssign op (cps_trans_exp localVars fargs ctxtName lhs) (cps_trans_exp localVars fargs ctxtName rhs) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CComma es nodeInfo)             = AST.CComma (map (cps_trans_exp localVars fargs ctxtName) es) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CCond e1 Nothing e3 nodeInfo)   = AST.CCond (cps_trans_exp localVars fargs ctxtName e1) Nothing (cps_trans_exp localVars fargs ctxtName e3) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CCond e1 (Just e2) e3 nodeInfo) = AST.CCond (cps_trans_exp localVars fargs ctxtName e1) (Just $ cps_trans_exp localVars fargs ctxtName e2) (cps_trans_exp localVars fargs ctxtName e3) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CBinary op e1 e2 nodeInfo)  = AST.CBinary op (cps_trans_exp localVars fargs ctxtName e1)  (cps_trans_exp localVars fargs ctxtName e2) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CCast decl e nodeInfo)      = AST.CCast decl (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CUnary op e nodeInfo)       = AST.CUnary op (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CSizeofExpr e nodeInfo)     = AST.CSizeofExpr (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CSizeofType decl nodeInfo)  = AST.CSizeofType decl nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CAlignofExpr e nodeInfo)    = AST.CAlignofExpr (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CAlignofType decl nodeInfo) = AST.CAlignofType decl nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CComplexReal e nodeInfo)    = AST.CComplexReal (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CComplexImag e nodeInfo)    = AST.CComplexImag (cps_trans_exp localVars fargs ctxtName e) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CIndex (cps_trans_exp localVars fargs ctxtName arr) (cps_trans_exp localVars fargs ctxtName idx) nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CCall f args nodeInfo)      = AST.CCall {- (cps_trans_exp ctxtName f) -} f (map (cps_trans_exp localVars fargs ctxtName) args) nodeInfo -- NOTE: we never add function id into the ctxt, function ids are immutable
+cps_trans_exp localVars fargs ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp localVars fargs ctxtName e) ident deref nodeInfo
+cps_trans_exp localVars fargs ctxtName (AST.CVar id _) =  
+  case unApp id ('_':labPref) of
+    { Nothing -> cvar id
+    ; Just id' | id' `S.member` (localVars `S.union` fargs) -> 
+      -- let io = unsafePerformIO $ print (localVars `S.union` fargs) >> print id'
+      -- in io `seq`
+      (cvar (iid ctxtParamName)) .->. id
+               | otherwise -> cvar id -- global
+    }
+
+cps_trans_exp localVars fargs ctxtName (AST.CConst c)                       = AST.CConst c
+cps_trans_exp localVars fargs ctxtName (AST.CCompoundLit decl initList nodeInfo) = AST.CCompoundLit decl initList nodeInfo -- todo check this
+cps_trans_exp localVars fargs ctxtName (AST.CStatExpr stmt nodeInfo )       = AST.CStatExpr stmt nodeInfo  -- todo GNU C compount statement as expr
+cps_trans_exp localVars fargs ctxtName (AST.CLabAddrExpr ident nodeInfo )   = AST.CLabAddrExpr ident nodeInfo -- todo  
+cps_trans_exp localVars fargs ctxtName (AST.CBuiltinExpr builtin )          = AST.CBuiltinExpr builtin -- todo build in expression
 
 {-
 top level translation   p => P
@@ -582,7 +603,7 @@ P1 = void f1 (void => void k) { B1 }
 -- 4. \bar{D} should be the context malloc and initialization
 -- 5. all the formal args should be copied to context
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
-ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) = 
+ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) = 
   let -- scraping the information from the top level function under obfuscation
       funName        = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
       formalArgDecls :: [AST.CDeclaration N.NodeInfo]
@@ -594,7 +615,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       ctxtStructName     = funName ++ "Ctxt"
       
       -- the context struct declaration
-      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy ptrArrs
+      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy ptrArrs local_decl_vars fargs
       ctxtName       = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
       
       -- finding the visitor labels and the exit labels
@@ -602,7 +623,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       exits          = allExits labelledBlocks
       
       -- all the conditional function 
-      conds          = allLoopConds ctxtName funName labelledBlocks 
+      conds          = allLoopConds local_decl_vars fargs ctxtName funName labelledBlocks 
       
       -- loop_cps, loop_lambda, id and pop and push
       loop_cps        = loopCPS ctxtName funName
@@ -613,7 +634,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom) =
       
       -- all the "nested/helper" function declarations 
       -- todo: packing all the variable into a record 
-      ps              = cps_trans_lbs isReturnVoid ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
+      ps              = cps_trans_lbs isReturnVoid  local_decl_vars fargs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       
       -- all function signatures
       funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])
@@ -669,15 +690,15 @@ allExits lbs = M.fromList $
                
 
 -- ^ retrieve all condional test from the loops and turn them into functions     
-allLoopConds :: ContextName -> String ->  M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
-allLoopConds ctxtName fname lbs = 
-  concatMap (\(id,lb) -> loopCond ctxtName fname (id,lb)) (M.toList lbs)
+allLoopConds :: S.Set Ident -> S.Set Ident -> ContextName -> String ->  M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
+allLoopConds local_vars fargs ctxtName fname lbs = 
+  concatMap (\(id,lb) -> loopCond local_vars fargs ctxtName fname (id,lb)) (M.toList lbs)
 
-loopCond :: ContextName -> String -> (NodeId, LabeledBlock) -> [AST.CFunctionDef N.NodeInfo]
-loopCond ctxtName fname (l,blk) 
+loopCond :: S.Set Ident -> S.Set Ident -> ContextName -> String -> (NodeId, LabeledBlock) -> [AST.CFunctionDef N.NodeInfo]
+loopCond  local_vars fargs ctxtName fname (l,blk) 
   | lb_loop blk =
     let stmts = lb_stmts blk
-        conds = [ cps_trans_exp ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
+        conds = [ cps_trans_exp local_vars fargs ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
         formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
                    [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
         decls = [ fun [AST.CTypeSpec boolTy] (iid fname `app` iid "cond" `app` l) [formalArgCtxt] [AST.CBlockStmt (AST.CReturn (Just cond) N.undefNode)]
@@ -868,8 +889,9 @@ mkContext :: String -> -- ^ context name
              [AST.CDeclaration N.NodeInfo] ->  -- ^ local variable declarations
              [AST.CDeclarationSpecifier N.NodeInfo] ->  -- ^ return Type
              [AST.CDerivedDeclarator N.NodeInfo] -> -- ^ the pointer or array postfix
+             S.Set Ident -> S.Set Ident -> 
              AST.CDeclaration N.NodeInfo
-mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs = 
+mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs local_decl_vars fargs = 
   let structName  = iid name
       ctxtAlias   = AST.CDeclr (Just (internalIdent (map toLower name))) [] Nothing [] N.undefNode
       attrs       = []
@@ -894,7 +916,7 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
       funcResult | isReturnVoid = [] 
                  | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
-                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks) (map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
                       [ksStack, condStack, visitorStack, exitStack, currStackSize] ++ funcResult
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
@@ -906,8 +928,8 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
 -- renameDeclWithLabels decl labels = map (renameDeclWithLabel decl) labels
 
 
-renameDeclWithLabeledBlocks :: AST.CDeclaration N.NodeInfo -> M.Map Ident LabeledBlock -> [AST.CDeclaration N.NodeInfo]
-renameDeclWithLabeledBlocks decl labeledBlocks = 
+renameDeclWithLabeledBlocks :: AST.CDeclaration N.NodeInfo -> M.Map Ident LabeledBlock -> S.Set Ident -> S.Set Ident -> [AST.CDeclaration N.NodeInfo]
+renameDeclWithLabeledBlocks decl labeledBlocks local_decl_vars fargs = 
   let idents = getFormalArgIds decl
   in do 
     { ident    <- idents
@@ -915,14 +937,14 @@ renameDeclWithLabeledBlocks decl labeledBlocks =
     ; if (null (lb_preds blk)) ||  -- it's the entry block
          (ident `elem` (lb_lvars blk)) ||  -- the var is in the lvars
          (ident `elem` (map fst (lb_phis blk))) -- the var is in the phi
-      then return (renameDeclWithLabel decl lb) 
+      then return (renameDeclWithLabel decl lb local_decl_vars fargs) 
       else []
     }
 
 
   
-renameDeclWithLabel decl label =   
-  let rnState = RSt label M.empty [] []
+renameDeclWithLabel decl label local_decl_vars fargs =   
+  let rnState = RSt label M.empty [] [] local_decl_vars fargs
   in case renamePure rnState decl of 
     { (decl', rstate', containers) -> decl' }
 

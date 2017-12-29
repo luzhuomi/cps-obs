@@ -343,7 +343,9 @@ data LabeledBlock = LB { lb_phis :: [( Ident -- ^ var being redefined
 -- apply translation on individual function.
 data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function wide global declaration (not yet renamed)
                , labelled_blocks :: M.Map Ident LabeledBlock     -- ^ translated labelled block (renamed)
-               , sdom_ssa :: SDom                                   -- ^ we need the sdom for SSA to CPS translation
+               , sdom_ssa :: SDom                                -- ^ we need the sdom for SSA to CPS translation
+               , ssa_local_vars :: S.Set Ident                   -- ^ function level local decl'ed vars
+               , ssa_formal_args :: S.Set Ident                  -- ^ function formal args
                }
            deriving Show
 {-  The SSA Language
@@ -496,7 +498,7 @@ buildSSA cfg fargs =
                                                                      }
                                                               }) rvarsNotLocal)
                                      }
-                               in RSt currLbl (rnEnvLocal `M.union` rnEnv) [] []
+                               in RSt currLbl (rnEnvLocal `M.union` rnEnv) [] [] allLocalVars formalArguments
 
                      renamedBlkItems_decls_containers :: ([AST.CCompoundBlockItem N.NodeInfo], [AST.CDeclaration N.NodeInfo], [Ident])
                      renamedBlkItems_decls_containers = renamePure rnState statements
@@ -530,7 +532,7 @@ buildSSA cfg fargs =
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             }
-          ssa = foldl eachNode (SSA [] M.empty sdom) $ M.toList cfg
+          ssa = foldl eachNode (SSA [] M.empty sdom allLocalVars formalArguments) $ M.toList cfg
       in ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
     }
 

@@ -7,6 +7,8 @@ module Language.C.Obfuscate.Var where
 
 import Control.Monad.State as MS
 import qualified Data.Map as M
+import qualified Data.Set as S
+import Data.List (inits, tails, isInfixOf, isPrefixOf)
 
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -29,14 +31,16 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 -- rename variables in block items and generate function scope declarations
 renamePure :: Renamable a => RenameState -> a ->  (a, [AST.CDeclaration N.NodeInfo], [Ident])
 renamePure rstate x = case MS.runState (rename x) rstate of 
-  { (y, rstate') -> (y, local_decls rstate', containers rstate') }
+  { (y, rstate') -> (y, node_local_decls rstate', containers rstate') }
 
 
 -- variable renaming
 data RenameState = RSt { lbl         :: Ident 
                        , rn_env      :: M.Map Ident Ident -- ^ variable -> renamed variable
-                       , local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ inner declaralation to be made to be function scope (the renaming should be done during translation to CPS)
+                       , node_local_decls :: [AST.CDeclaration N.NodeInfo] -- ^ node level inner declaralation to be made to be function scope (the renaming should be done during translation to CPS)
                        , containers  :: [Ident] -- ^ lvars that are a struct, or pointer to struct, this will be use to create an extra scalar copy statement
+                       , func_local_vars :: S.Set Ident -- ^ all locally declared vars in the source function
+                       , formal_arg_vars :: S.Set Ident -- ^ formal args from the source function 
                        }
                  deriving Show
 
@@ -103,8 +107,8 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     -- and move the declaration to the global level.
     { let (decl', stmt) = splitDecl decl --split the decl out first.
     ; stmt' <- rename stmt
-    ; RSt lbl rn_env local_decls containers <- get
-    ; put (RSt lbl rn_env (local_decls ++ [decl']) containers)
+    ; RSt lbl rn_env local_decls containers local_decl_vars fargs <- get
+    ; put (RSt lbl rn_env (local_decls ++ [decl']) containers local_decl_vars fargs)
     ; return (AST.CBlockStmt stmt')
     } 
   update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
@@ -309,10 +313,10 @@ instance Renamable Ident where
       }
     }      
   update ident = do 
-    { RSt lbl env decls containers <- get
+    { RSt lbl env decls containers local_decl_vars fargs <- get
     ; let renamed = ident `app` lbl
           env'    = upsert ident renamed env
-    ; put (RSt lbl env' decls containers)
+    ; put (RSt lbl env' decls containers local_decl_vars fargs)
     ; return renamed
     }
 
@@ -433,8 +437,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; i' <- rename i -- i is not updated
     ; case e of
       { (AST.CVar id _) -> do  -- todo what if var is nested deep inside
-           { (RSt lbl env decls containers) <- get
-           ; put (RSt lbl env decls (containers ++ [id]))
+           { (RSt lbl env decls containers local_decl_vars fargs) <- get
+           ; put (RSt lbl env decls (containers ++ [id]) local_decl_vars fargs)
            }
       ; _ -> return ()
       }
@@ -446,8 +450,8 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     { e' <- update e
     ; case e of
       { (AST.CVar id _) -> do 
-           { (RSt lbl env decls containers) <- get
-           ; put (RSt lbl env decls (containers ++ [id]))
+           { (RSt lbl env decls containers local_decl_vars fargs) <- get
+           ; put (RSt lbl env decls (containers ++ [id]) local_decl_vars fargs)
            }
       ; _ -> return ()
       }
@@ -474,6 +478,23 @@ instance Renamable (AST.CExpression N.NodeInfo) where
 -- append two identifiers with _
 app :: Ident -> Ident -> Ident
 app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
+
+-- remove the trailing label 
+unApp :: Ident -> String -> Maybe Ident 
+unApp (Ident s1 hash1 nodeInfo1) inf 
+  | inf `isInfixOf` s1 = 
+    let hts = zip (inits s1) (tails s1)
+        go [] s = Nothing
+        go ((head,tail):ts) s | s `isPrefixOf` tail = Just head
+                              | otherwise = go ts s
+    in case go hts inf of 
+      { Nothing -> Nothing 
+      ; Just p  -> Just (internalIdent p)
+      }
+  | otherwise = Nothing
+
+         
+
 
 -- split a declaration into the declaration and a assignment statement
 splitDecl :: AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
