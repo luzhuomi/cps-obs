@@ -17,13 +17,15 @@ isMain fundef = case getFunName fundef of
   ; _ -> False
   }
 
+gcc = "gcc" -- for linux
+-- gcc = "/usr/local/bin/gcc-7" -- for mac with homebrew
 
 main :: IO ()
 main = do 
   { let opts = []
   ; args <- getArgs
   ; let (src:dest:opts) = args
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts src
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC gcc) Nothing opts src
   ; case ast of 
     { AST.CTranslUnit defs nodeInfo -> do 
          { writeFile dest ""
