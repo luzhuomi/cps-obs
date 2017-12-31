@@ -17,8 +17,8 @@ isMain fundef = case getFunName fundef of
   ; _ -> False
   }
 
-gcc = "gcc" -- for linux
--- gcc = "/usr/local/bin/gcc-7" -- for mac with homebrew
+-- gcc = "gcc" -- for linux
+gcc = "/usr/local/bin/gcc-7" -- for mac with homebrew
 
 main :: IO ()
 main = do 

@@ -637,7 +637,7 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
       ps              = cps_trans_lbs isReturnVoid  local_decl_vars fargs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       
       -- all function signatures
-      funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])
+      funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps, fundef]) -- include the source func, in case of recursion
       main_decls = 
         -- 1. malloc the context obj in the main func
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
@@ -936,7 +936,8 @@ renameDeclWithLabeledBlocks decl labeledBlocks local_decl_vars fargs =
     ; (lb,blk) <- M.toList labeledBlocks 
     ; if (null (lb_preds blk)) ||  -- it's the entry block
          (ident `elem` (lb_lvars blk)) ||  -- the var is in the lvars
-         (ident `elem` (map fst (lb_phis blk))) -- the var is in the phi
+         (ident `elem` (map fst (lb_phis blk))) || -- the var is in the phi
+         (ident `elem` (lb_containers blk)) -- the var is one of the lhs container ids such as array or members
       then return (renameDeclWithLabel decl lb local_decl_vars fargs) 
       else []
     }

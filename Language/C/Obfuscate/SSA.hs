@@ -335,6 +335,7 @@ data LabeledBlock = LB { lb_phis :: [( Ident -- ^ var being redefined
                        , lb_succs :: [NodeId]
                        , lb_lvars :: [Ident]
                        , lb_rvars :: [Ident]
+                       , lb_containers :: [Ident]
                        , lb_loop  :: Bool
                        }
                     deriving Show
@@ -517,11 +518,11 @@ buildSSA cfg fargs =
                                          ; precLbls -> case lookup container phis_ of  -- phi block
                                               { Just _  -> [] -- should be covered by the phi translations
                                               ; Nothing ->
-                                                   case map (\precLbl -> precDef precLbl container dtree cfg) precLbls of
+                                                   case filter isJust $ map (\precLbl -> precDef precLbl container dtree cfg) precLbls of
                                                      { [] -> error "impossible"
-                                                     ; (def:defs) | (all isJust (def:defs)) && (all (\d -> d == def) defs) ->
+                                                     ; (def:defs) | (all (\d -> d == def) defs) ->
                                                              let (Just def_lbl) = def
-                                                             in [container, container `app` def_lbl]
+                                                             in [container `app` def_lbl]
                                                                   | otherwise -> error $ "buildSSA: scalar copy variable " ++ (show container) ++ " has a conflicting preceding definition"
                                                      }
                                               }
@@ -529,7 +530,7 @@ buildSSA cfg fargs =
                                    in map (\container' -> AST.CBlockStmt (AST.CExpr (Just ((cvar (container `app` currLbl)) .=. (cvar container'))) N.undefNode)) containers'
                                  ) containers
                      isLoop x = case x of { (IsLoop _ _) -> True ; _ -> False }
-                     labelled_block = LB phis_ ((scalar_copy containers) ++ renamedBlkItems) precLbls succLbls (lVars node) (rVars node) (isLoop switchOrLoop)
+                     labelled_block = LB phis_ ((scalar_copy containers) ++ renamedBlkItems) precLbls succLbls (lVars node) (rVars node) containers (isLoop switchOrLoop)
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             }
