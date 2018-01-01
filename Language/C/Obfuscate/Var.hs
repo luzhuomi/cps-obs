@@ -492,21 +492,23 @@ getContainerIDs (AST.CBuiltinExpr bi) = []
 
 -- append two identifiers with _
 app :: Ident -> Ident -> Ident
-app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_" ++  s2
+app (Ident s1 hash1 nodeInfo1) (Ident s2 hash2 nodeInfo2) = internalIdent $ s1 ++ "_cppobs_" ++  s2
 
 -- remove the trailing label 
-unApp :: Ident -> String -> Maybe Ident 
-unApp (Ident s1 hash1 nodeInfo1) inf 
-  | inf `isInfixOf` s1 = 
-    let hts = zip (inits s1) (tails s1)
-        go [] s = Nothing
-        go ((head,tail):ts) s | s `isPrefixOf` tail = Just head
-                              | otherwise = go ts s
-    in case go hts inf of 
-      { Nothing -> Nothing 
-      ; Just p  -> Just (internalIdent p)
-      }
-  | otherwise = Nothing
+unApp :: Ident -> Maybe Ident 
+unApp (Ident s1 hash1 nodeInfo1) = 
+  let inf = "_cppobs_"
+  in if inf `isInfixOf` s1  
+     then
+       let hts = zip (inits s1) (tails s1)
+           go [] s = Nothing
+           go ((head,tail):ts) s | s `isPrefixOf` tail = Just head
+                                 | otherwise = go ts s
+       in case go hts inf of 
+         { Nothing -> Nothing 
+         ; Just p  -> Just (internalIdent p)
+         }
+     else Nothing
 
          
 

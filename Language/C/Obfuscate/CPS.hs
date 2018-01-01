@@ -393,29 +393,30 @@ fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
    }
 {-
 ----------------------------------------------------------------------------- (returnNil)
-fn, K, \bar{\Delta}, \bar{b} |-_l return; => K();
+fn, K, \bar{\Delta}, \bar{b} |-_l return; =>  id(); 
 -}
 -- C does not support higher order function.
 -- K is passed in as a formal arg
 -- K is a pointer to function
+-- updated: change from K(); to id(); because of return in a loop, (see noreturn.c)
 cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
   in [ funcall ]
 
 {-
 e => E
 ----------------------------------------------------------------------------- (returnE)
-fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E; K()
+fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E;  id()
 -}
 -- C does not support higher order function.
 -- x_r and K belong to the contxt
 -- K is a pointer to function
 cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) 
   | isReturnVoid = 
-    let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode) 
+    let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode) 
     in [ funcall ]
   | otherwise = 
-      let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind (cvar k)) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
+      let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
           e' = cps_trans_exp localVars fargs ctxtName e
           assign = ((cvar (iid ctxtParamName)) .->. (iid "func_result")) .=. e' 
       in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
@@ -442,7 +443,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
           ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
           }
         lbl_fl = case mbFalseStmt of 
-          { Just (AST.CGoto lbl _) -> lbl 
+          { Just (AST.CGoto lbl _) -> lbl
           ; _ -> error "cps_trans_stmt error: the false statement in a looping if statement does not contain goto"
           }
         push_args :: [AST.CExpression N.NodeInfo]
@@ -569,7 +570,7 @@ cps_trans_exp localVars fargs ctxtName (AST.CIndex arr idx nodeInfo)    = AST.CI
 cps_trans_exp localVars fargs ctxtName (AST.CCall f args nodeInfo)      = AST.CCall (cps_trans_exp localVars fargs ctxtName f) (map (cps_trans_exp localVars fargs ctxtName) args) nodeInfo 
 cps_trans_exp localVars fargs ctxtName (AST.CMember e ident deref nodeInfo) = AST.CMember  (cps_trans_exp localVars fargs ctxtName e) ident deref nodeInfo
 cps_trans_exp localVars fargs ctxtName (AST.CVar id _) =  
-  case unApp id ('_':labPref) of
+  case unApp id of
     { Nothing -> cvar id
     ; Just id' | id' `S.member` (localVars `S.union` fargs) -> 
       -- let io = unsafePerformIO $ print (localVars `S.union` fargs) >> print id'

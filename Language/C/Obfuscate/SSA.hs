@@ -210,7 +210,7 @@ buildDF' (dtree, pcm, sdom, cfg) =
              let bs    = succs n
                  idoms = idom dft
              in concatMap (\b -> case M.lookup b idoms of
-                              { Nothing               -> []
+                              { Nothing               -> [b] -- shouldn't be [], b has no idoms, means it is 0
                               ; Just idom | a == idom -> []
                                           | otherwise -> [b]
                               }) bs
@@ -248,7 +248,7 @@ buildDF' (dtree, pcm, sdom, cfg) =
         in a_df1 ++ bs
 
       empDFT = DFTable idoms M.empty M.empty M.empty
-
+      -- io = unsafePerformIO $ print po >> print cfg
   in foldl (\dft id ->
              let df1'  = findDF1  id dft
                  dfup' = findDFup id dft
@@ -325,7 +325,7 @@ phiLoc var cfg dft =
 
 -- ^ retrieve the blocks from a CFG where a variable is being modified.
 modLoc :: Ident -> CFG -> [Ident]
-modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lVars node)) (M.toList cfg))
+modLoc var cfg = map fst (filter (\(label, node) ->  (var `elem` lVars node)) (M.toList cfg)) 
 
 
 data LabeledBlock = LB { lb_phis :: [( Ident -- ^ var being redefined
@@ -534,7 +534,9 @@ buildSSA cfg fargs =
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             }
-          ssa = foldl eachNode (SSA [] M.empty sdom allLocalVars formalArguments) $ M.toList cfg
+          -- io = unsafePerformIO $ print (map (\var -> (var, modLoc var cfg)) allVarsUsed) >> print dtree >> print dft >> print pcm >> print sdom
+
+          ssa = {- io `seq` -} foldl eachNode (SSA [] M.empty sdom allLocalVars formalArguments) $ M.toList cfg
       in ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
     }
 

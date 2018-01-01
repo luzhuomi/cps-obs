@@ -180,7 +180,7 @@ instance CProg (AST.CFunctionDef N.NodeInfo)  where
     { buildCFG stmt 
     ; st <- get
     ; let fargs = concatMap getFormalArgIds (getFormalArgsFromDeclarator declarator)
-    ; put st{ cfg = formalArgsAsDecls fargs (insertGotos (cfg st))
+    ; put st{ cfg = formalArgsAsDecls fargs (insertPhantoms (insertGotos (cfg st)))
             , formalArgs = fargs}
     ; return ()
     }
@@ -481,10 +481,10 @@ CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2,
           breakNodes2 = breakNodes st1
           contNodes2  = contNodes st1
           -- add the stmt back to the curr node (If statement)
-          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2' 
+          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, succs=(succs n)++[internalIdent (labPref++show max2)], switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2'  -- preds n == preds0, preds1 are exits nodes from the loop body, contNodes2 are the continuation nodes from loop body,
           cfg3       = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) l g) cfg2'' contNodes2 -- update the break and cont immediately
           cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
-    ; put st1{cfg = cfg2'', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
+    ; put st1{cfg = cfg3', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
     }
 {-  
 CFG, max, preds, continuable |- stmt => CFG1, max1, preds1, false 
@@ -898,6 +898,7 @@ getVarsFromExp (AST.CBuiltinExpr builtin )   = ([],[]) -- todo build in expressi
 -- ^ insert goto statement according to the succ 
 -- ^ 1. skipping if statement
 -- ^ 2. insert only the last statement is not goto
+-- ^ 3. if the block ends with break or continue, replace the last statement by goto 
 insertGotos :: CFG -> CFG
 insertGotos cfg = 
   let containsIf :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool
@@ -972,6 +973,37 @@ insertGotos cfg =
                         in node{stmts=(stmts node) ++ [gt]}
                       }
   in M.map insertGT (updatePreds cfg)
+     
+-- ^ there are situation a phantom node (a label is mentioned in some goto or loop exit, but 
+-- ^ there is no statement, hence, buildCFG will not generate such node. see\
+{-
+int f(int x) {
+  while (1) { // 0 
+    if (x < 0) { // 1
+      return x; // 2
+    } else { 
+      x--; // 3
+    }
+  }
+  // 4
+}
+-} 
+-- note that 4 is phantom as succs of the failure etst of (1) at 0, which is not reachable,
+-- but we need that empty node (and lambda function to be present) for the target code to be valid
+insertPhantoms :: CFG -> CFG 
+insertPhantoms cfg =  
+  let allSuccsWithPreds :: [(Ident,Ident)] -- succ lbl and source lbl
+      allSuccsWithPreds = concatMap (\(lbl,n) -> map (\succ -> (succ, lbl)) (succs n)) (M.toList cfg)
+      phantomSuccsWithPreds :: M.Map Ident [Ident] -- succ lbl -> [source lbl]
+      phantomSuccsWithPreds = 
+        foldl (\m (succ_lbl, lbl) -> case M.lookup succ_lbl m of
+                  { Nothing -> M.insert succ_lbl [lbl] m
+                  ; Just _ -> M.update (\lbls -> Just (lbls ++ [lbl])) succ_lbl m
+                  }) M.empty 
+        (filter (\(succ_lbl,lbl) -> not (succ_lbl `M.member` cfg)) allSuccsWithPreds)
+  in cfg `M.union` (M.map (\preds -> Node [] [] [] [] preds [] Neither) phantomSuccsWithPreds)
+
+      
 
 -- TODO:
 -- I am trying to inject the formal arguments into the blk 0 as declaration so that
