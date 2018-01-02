@@ -436,7 +436,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   update (AST.CIndex e i nodeInfo) = do 
     { e' <- update e
     ; i' <- rename i -- i is not updated
-    ; let containerIDs =  getContainerIDs e
+    ; let containerIDs =  getContainerIDs e -- containerIDs handle case x[i] = e
     ; (RSt lbl env decls containers local_decl_vars fargs) <- get
     ; let containerIDs' = filter (\id -> id `S.member` (local_decl_vars `S.union` fargs)) containerIDs
     ; put (RSt lbl env decls (nub $ sort $ containers ++ containerIDs') local_decl_vars fargs)
@@ -446,7 +446,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
   update (AST.CAssign op lval rval nodeInfo) = error "can't update assignment expression"
   update (AST.CMember e i isDeRef nodeInfo) = do 
     { e' <- update e
-    ; let containerIDs =  getContainerIDs e
+    ; let containerIDs =  getContainerIDs e -- containerIDs handle case x->f = e
     ; (RSt lbl env decls containers local_decl_vars fargs) <- get
     ; let containerIDs' = filter (\id -> id `S.member` (local_decl_vars `S.union` fargs)) containerIDs                                                              
     ; put (RSt lbl env decls (nub $ sort $ containers ++ containerIDs') local_decl_vars fargs)
@@ -456,8 +456,12 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     { e' <- update e
     ; return (AST.CCast tydecl e' nodeInfo)
     }
-  update (AST.CUnary op e nodeInfo) = do 
+  update (AST.CUnary op e nodeInfo) = do  
     { e' <- update e
+    ; let containerIDs =  getContainerIDs e -- containerIDs handle case (*x) = e
+    ; (RSt lbl env decls containers local_decl_vars fargs) <- get
+    ; let containerIDs' = filter (\id -> id `S.member` (local_decl_vars `S.union` fargs)) containerIDs                                                              
+    ; put (RSt lbl env decls (nub $ sort $ containers ++ containerIDs') local_decl_vars fargs)
     ; return (AST.CUnary op e' nodeInfo)
     }
   update (AST.CCall f e nodeInfo) = do 

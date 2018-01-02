@@ -834,11 +834,12 @@ getRHSVarFromExp (AST.CBuiltinExpr builtin )   = [] -- todo build in expression
 
 getVarsFromLHS :: AST.CExpression a -> ([Ident], [Ident])
 getVarsFromLHS (AST.CVar ident _) = ([ident], [])
-getVarsFromLHS (AST.CIndex arr idx _) = 
+getVarsFromLHS (AST.CIndex arr idx _) =   -- require container's scalar copy, see SSA scalar copy
   let (lvars1, rvars1) = getVarsFromLHS arr
       (lvars2, rvars2) = getVarsFromExp idx -- correct!
   in (lvars1 ++ lvars2, rvars1 ++ rvars2)
-getVarsFromLHS (AST.CMember strt mem _ _) = getVarsFromLHS strt
+getVarsFromLHS (AST.CMember strt mem _ _) = getVarsFromLHS strt -- require container's scalar copy, see SSA scalar copy
+getVarsFromLHS (AST.CUnary op e _) = getVarsFromLHS e  -- require container's scalar copy, see SSA scalar copy
 getVarsFromLHS e = getVarsFromExp e
   
 
