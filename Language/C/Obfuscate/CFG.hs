@@ -285,6 +285,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostDecOp e nodeInfo')) nodeInfo) = 
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
   -- not assigment, pretty much the same as the assignment expression except that we don't care about the lhs vars
+  buildCFG (AST.CExpr (Just (AST.CComma exps ni')) ni) = mapM_ buildCFG (map (\exp -> (AST.CExpr (Just exp) ni)) exps)
   buildCFG (AST.CExpr (Just exp) nodeInfo) =  do  
     { st <- get
     ; let cfg0     = cfg st

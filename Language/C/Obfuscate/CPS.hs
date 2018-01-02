@@ -919,7 +919,7 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
                  | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
         -- note: we remove local decl duplicate, maybe we should let different label block to have different type decl in the ctxt, see test/scoped_dup_var.c
-                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map (cps_trans_declaration . dropConstTyQual) (formal_arg_decls ++ local_var_decls)) ++ 
                       [ksStack, condStack, visitorStack, exitStack, currStackSize] ++ funcResult
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
@@ -927,12 +927,20 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
                        (AST.CStruct AST.CStructTag (Just structName) (Just decls') attrs N.undefNode) N.undefNode) 
   in AST.CDecl [tyDef, structDef] [(Just ctxtAlias, Nothing, Nothing)] N.undefNode
 
-
+-- eq for the declaration nub, see the above
 declLHSEq (AST.CDecl declSpecifiers1 trips1 _) (AST.CDecl declSpecifiers2 trips2 _) = 
   let getIds trips = map (\(mb_decl, mb_init, mb_size) -> case mb_decl of 
                              { Just (AST.CDeclr mb_id derivedDeclarators mb_strLit attrs nInfo) -> mb_id 
                              ; Nothing -> Nothing }) trips
   in (getIds trips1) == (getIds trips2)
+
+-- we need to drop the constant type specifier since we need to initialize them in block 0, see test/const.c
+dropConstTyQual :: AST.CDeclaration N.NodeInfo -> AST.CDeclaration N.NodeInfo 
+dropConstTyQual decl = case decl of                    
+  { AST.CDecl declSpecifiers trips ni -> AST.CDecl (filter (not . isConst) declSpecifiers) trips ni }
+  where isConst (AST.CTypeQual (AST.CConstQual _)) = True
+        isConst _ = False
+
 
 -- renameDeclWithLabels :: AST.CDeclaration N.NodeInfo -> [Ident] -> [AST.CDeclaration N.NodeInfo]
 -- renameDeclWithLabels decl labels = map (renameDeclWithLabel decl) labels
