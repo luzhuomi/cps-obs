@@ -8,7 +8,7 @@ module Language.C.Obfuscate.Var where
 import Control.Monad.State as MS
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.List (inits, tails, isInfixOf, isPrefixOf, nub)
+import Data.List (inits, tails, isInfixOf, isPrefixOf, nub, sort)
 
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -439,7 +439,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; let containerIDs =  getContainerIDs e
     ; (RSt lbl env decls containers local_decl_vars fargs) <- get
     ; let containerIDs' = filter (\id -> id `S.member` (local_decl_vars `S.union` fargs)) containerIDs
-    ; put (RSt lbl env decls (nub $ containers ++ containerIDs') local_decl_vars fargs)
+    ; put (RSt lbl env decls (nub $ sort $ containers ++ containerIDs') local_decl_vars fargs)
     ; return (AST.CIndex e' i' nodeInfo)
     }
   update (AST.CComma exps nodeInfo) = error "can't update comma expression"
@@ -449,7 +449,7 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; let containerIDs =  getContainerIDs e
     ; (RSt lbl env decls containers local_decl_vars fargs) <- get
     ; let containerIDs' = filter (\id -> id `S.member` (local_decl_vars `S.union` fargs)) containerIDs                                                              
-    ; put (RSt lbl env decls (nub $ containers ++ containerIDs') local_decl_vars fargs)
+    ; put (RSt lbl env decls (nub $ sort $ containers ++ containerIDs') local_decl_vars fargs)
     ; return (AST.CMember e' i isDeRef nodeInfo)
     }
   update (AST.CCast tydecl e nodeInfo) = do 

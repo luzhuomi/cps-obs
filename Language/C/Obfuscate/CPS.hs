@@ -2,6 +2,7 @@
 module Language.C.Obfuscate.CPS
        where
 import Data.Char
+import Data.List (nubBy)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Language.C.Syntax.AST as AST
@@ -917,13 +918,21 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
       funcResult | isReturnVoid = [] 
                  | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
-                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
+        -- note: we remove local decl duplicate, maybe we should let different label block to have different type decl in the ctxt, see test/scoped_dup_var.c
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map cps_trans_declaration (formal_arg_decls ++ local_var_decls)) ++ 
                       [ksStack, condStack, visitorStack, exitStack, currStackSize] ++ funcResult
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
         AST.CTypeSpec (AST.CSUType
                        (AST.CStruct AST.CStructTag (Just structName) (Just decls') attrs N.undefNode) N.undefNode) 
   in AST.CDecl [tyDef, structDef] [(Just ctxtAlias, Nothing, Nothing)] N.undefNode
+
+
+declLHSEq (AST.CDecl declSpecifiers1 trips1 _) (AST.CDecl declSpecifiers2 trips2 _) = 
+  let getIds trips = map (\(mb_decl, mb_init, mb_size) -> case mb_decl of 
+                             { Just (AST.CDeclr mb_id derivedDeclarators mb_strLit attrs nInfo) -> mb_id 
+                             ; Nothing -> Nothing }) trips
+  in (getIds trips1) == (getIds trips2)
 
 -- renameDeclWithLabels :: AST.CDeclaration N.NodeInfo -> [Ident] -> [AST.CDeclaration N.NodeInfo]
 -- renameDeclWithLabels decl labels = map (renameDeclWithLabel decl) labels
@@ -949,8 +958,6 @@ renameDeclWithLabel decl label local_decl_vars fargs =
   let rnState = RSt label M.empty [] [] local_decl_vars fargs
   in case renamePure rnState decl of 
     { (decl', rstate', containers) -> decl' }
-
-
 
 
 {-
