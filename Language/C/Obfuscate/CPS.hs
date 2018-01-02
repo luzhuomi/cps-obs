@@ -457,7 +457,7 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
         push = fname `app` (iid "push")
         call_push = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar push) push_args N.undefNode)) N.undefNode)
         
-        loop =  fname `app` iid "loop"
+        loop =  fname `app` iid "loop__entry"
         loop_args  = [ (cvar (iid ctxtParamName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
                      , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
                      , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
@@ -830,7 +830,7 @@ loopCPS ctxtName fname =
       ctxt          = iid ctxtParamName                 
       formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
                  [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop__entry") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
      [
        AST.CBlockStmt (AST.CIf (funCall (ind (cvar cond)) [(cvar ctxt)]) 
                        (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind (cvar visitor)) [ adr (cvar (iid fname `app` iid "lambda_loop"))
@@ -853,7 +853,7 @@ lambdaLoopCPS ctxtName fname =
       formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
                  [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
   in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "lambda_loop") [formalArgCtxt] 
-       [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (iid fname `app` iid "loop"))  
+       [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (iid fname `app` iid "loop__entry"))  
                                           [ ((cvar ctxt) .->. (iid "loop_conds")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))
                                           , ((cvar ctxt) .->. (iid "loop_visitors")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))
                                           , ((cvar ctxt) .->. (iid "loop_exits")) .!!. ((cvar ctxt) .->. (iid currStackSizeName))                                            
