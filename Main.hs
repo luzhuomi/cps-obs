@@ -61,10 +61,11 @@ main = do
         { AST.CTranslUnit defs nodeInfo -> do 
              { writeFile dest ""
              ; let wl = S.fromList (map unpack (whitelist config))
-                   isWhiteListed fundef = case getFunName fundef of 
-                     { Nothing -> False
-                     ; Just n  -> n `S.member` wl}
-                     
+                   isWhiteListed fundef 
+                     | S.null wl = True  -- if the white list is empty, everything is in the white list
+                     | otherwise = case getFunName fundef of 
+                       { Nothing -> False
+                       ; Just n  -> n `S.member` wl}
              ; mapM_ (\def -> case def of 
                          { AST.CFDefExt fundef | not (isMain fundef) && 
                                                  not (isInlineFun fundef) && 
