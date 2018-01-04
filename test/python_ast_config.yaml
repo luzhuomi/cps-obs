@@ -1,0 +1,73 @@
+# location of the preprocessor
+gcc: /usr/local/bin/gcc-7
+# functions to be obfusicated
+whitelist:
+    - new_identifier
+    - ast_error
+    - ast_error_finish
+    - ast_warn
+    - forbidden_check
+    - get_operator
+    - set_context
+    - ast_for_augassign
+    - ast_for_comp_op
+    - seq_for_testlist
+    - compiler_complex_args
+    - ast_for_dotted_name
+    - ast_for_decorator
+    - ast_for_decorators
+    - ast_for_funcdef
+    - ast_for_decorated
+    - ast_for_lambdef
+    - ast_for_ifexpr
+    - count_list_fors
+    - count_list_ifs
+    - ast_for_listcomp
+    - count_comp_fors
+    - count_comp_ifs
+    - ast_for_comprehension
+    - ast_for_itercomp
+    - ast_for_dictcomp
+    - ast_for_genexp
+    - ast_for_setcomp
+    - ast_for_slice
+    - ast_for_binop
+    - ast_for_trailer
+    - ast_for_factor
+    - ast_for_power
+    - ast_for_call
+    - ast_for_testlist
+    - ast_for_testlist_comp
+    - ast_for_class_bases
+    - ast_for_expr_stmt
+    - ast_for_exprlist
+    - ast_for_del_stmt
+    - ast_for_flow_stmt
+    - ast_for_global_stmt
+    - ast_for_exec_stmt
+    - ast_for_assert_stmt
+    - ast_for_while_stmt
+    - ast_for_for_stmt
+    - ast_for_except_clause
+    - ast_for_try_stmt
+    - ast_for_with_item
+    - ast_for_classdef
+    - ast_for_stmt
+    - parsenumber
+    - decode_utf8
+    - decode_unicode
+# blacklist has no effect for now
+blacklist:
+    - num_stmts (segfault import error)
+    - PyAST_FromNode (bus error)
+    - ast_for_atom (segfault import error)
+    - ast_for_expr (loop forever)
+    - alias_for_import_name (loop forever)
+    - ast_for_import_stmt (assertion fail)
+    - ast_for_suite (segfault import error)
+    - ast_for_if_stmt (segfault import error)
+    - ast_for_print_stmt (run-time error empty print out)
+    - ast_for_with_stmt (segfault import error)
+    - parsestr (segfault import error)
+    - parsestrplus (segfault import error)
+    

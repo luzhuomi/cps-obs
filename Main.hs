@@ -18,7 +18,7 @@ import Data.Yaml (FromJSON(..), (.:))
 import Data.ByteString (ByteString, readFile)
 import Control.Applicative
 import Prelude hiding (readFile) -- Ensure Applicative is in scope and we have no warnings, before/after AMP.
-
+import qualified Data.Set as S
 
 isMain fundef = case getFunName fundef of 
   { Just "main" -> True
@@ -28,8 +28,9 @@ isMain fundef = case getFunName fundef of
 
 data Config =
   Config {
-    gcc  :: Text
-  , whitelist  :: [Text]
+    gcc :: Text
+  , whitelist :: [Text]
+  , blacklist :: [Text]
   } deriving (Eq, Show)
 
 
@@ -37,7 +38,8 @@ instance FromJSON Config where
   parseJSON (Y.Object v) =
     Config <$>
     v .:   (pack "gcc")       <*>
-    v .:   (pack "whitelist")
+    v .:   (pack "whitelist") <*>
+    v .:   (pack "blacklist")
   parseJSON _ = fail "Expected Object for Config value"
 
 -- gcc = "gcc" -- for linux
@@ -52,14 +54,21 @@ main = do
   ; let mb_config :: Maybe Config 
         mb_config = Y.decode configFile
   ; case mb_config of 
-    { Nothing -> error "Error: config.yaml not valid"
+    { Nothing -> error "Error: Invalid config.yaml."
     ; Just config -> do 
       { ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC (unpack $ gcc config)) Nothing opts src
       ; case ast of 
         { AST.CTranslUnit defs nodeInfo -> do 
              { writeFile dest ""
+             ; let wl = S.fromList (map unpack (whitelist config))
+                   isWhiteListed fundef = case getFunName fundef of 
+                     { Nothing -> False
+                     ; Just n  -> n `S.member` wl}
+                     
              ; mapM_ (\def -> case def of 
-                         { AST.CFDefExt fundef | not (isMain fundef) && not (isInlineFun fundef) -> 
+                         { AST.CFDefExt fundef | not (isMain fundef) && 
+                                                 not (isInlineFun fundef) && 
+                                                 isWhiteListed fundef -> 
                               case runCFG fundef of
                                 { CFGOk (_, state) -> do 
                                      { let ssa = buildSSA (cfg state) (formalArgs state)
