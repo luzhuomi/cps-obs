@@ -80,9 +80,9 @@ int main() {
   node * p = (node *) malloc(sizeof(node));
   node * c1 = (node *) malloc(sizeof(node));
   c1->n_str = "hello";
-  c1->n_type = 4;
+  c1->n_type = 257;
   p->n_str = "world";
-  p->n_type = 256;
+  p->n_type = 257;
   p->n_nchildren = 1;
   p->n_child = (node *)malloc(sizeof(node)*1);
   p->n_child = c1;
