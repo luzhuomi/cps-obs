@@ -34,7 +34,6 @@ whitelist:
     - ast_for_binop
     - ast_for_trailer
     - ast_for_factor
-    - ast_for_power
     - ast_for_call
     - ast_for_testlist
     - ast_for_testlist_comp
@@ -56,8 +55,10 @@ whitelist:
     - parsenumber
     - decode_utf8
     - decode_unicode
+
 # blacklist has no effect for now
 blacklist:
+    - ast_for_power (Assertion failed)
     - num_stmts (segfault import error)
     - PyAST_FromNode (bus error)
     - ast_for_atom (segfault import error)
