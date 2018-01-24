@@ -682,7 +682,8 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         }
   in CPS main_decls main_stmts funcSignatures (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])  context main_func 
      
--- ^ turn an scope declaration into a rhs initalization.     
+-- ^ turn a scope declaration into a rhs initalization.     
+-- ^ refer to local_array.c
 containerDeclToInit :: AST.CDeclaration N.NodeInfo -> Maybe (Ident, AST.CExpression N.NodeInfo)
 containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of 
   { (Just decl@(AST.CDeclr (Just arrName) [arrDecl] _ _ _), _, _):_ -> 

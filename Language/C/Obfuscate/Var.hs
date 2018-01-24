@@ -105,10 +105,13 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
   rename (AST.CBlockDecl decl) = do 
     -- turn it into a renamed assignment statement 
     -- and move the declaration to the global level.
-    { let (decl', stmt) = splitDecl decl --split the decl out first.
+    { let (decl', stmt) = splitDecl decl --split the decl out first. 
+          -- extract containers from decl' i.e. a local array is declared in a local scope, 
+          -- its initialization will be moved to node 0. the array need to be scalar_copied from the predecessor. see test/local_array.c
+          containers' = getContainerIDsFromDecl decl'
     ; stmt' <- rename stmt
     ; RSt lbl rn_env local_decls containers local_decl_vars fargs <- get
-    ; put (RSt lbl rn_env (local_decls ++ [decl']) containers local_decl_vars fargs)
+    ; put (RSt lbl rn_env (local_decls ++ [decl']) (containers ++ containers') local_decl_vars fargs)
     ; return (AST.CBlockStmt stmt')
     } 
   update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
@@ -470,6 +473,18 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; return (AST.CCall f' e' nodeInfo)
     }
   update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
+  
+-- ^ get the container id from the lhs of the declaration  
+-- ^ it seems that we only need to get array id, 
+-- ^ todo: double check we do not need to get pointer id
+getContainerIDsFromDecl :: AST.CDeclaration N.NodeInfo -> [Ident]  
+getContainerIDsFromDecl (AST.CDecl typespecs tripls nodeInfo0) = case tripls of 
+  { (Just decl@(AST.CDeclr (Just arrName) [arrDecl] _ _ _), _, _):_ ->
+       case arrDecl of { AST.CArrDeclr _ (AST.CArrSize _ size) _ -> [arrName]
+                       ; _ -> []
+                       }
+  ; _ -> []
+  }
   
 getContainerIDs :: AST.CExpression N.NodeInfo -> [Ident]
 getContainerIDs (AST.CAssign op lval rval _) = getContainerIDs lval
