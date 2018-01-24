@@ -3,6 +3,7 @@ module Language.C.Obfuscate.CPS
        where
 import Data.Char
 import Data.List (nubBy)
+import Data.Maybe 
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Language.C.Syntax.AST as AST
@@ -656,9 +657,17 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         -- 2. initialize the counter-part  in the context of the formal args
         -- forall arg. ctxt->arg_label0 = arg 
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (arg `app` (iid $ labPref ++ "0" ))) .=. (AST.CVar arg N.undefNode))) N.undefNode) | arg <- formalArgIds] ++ 
-        -- initialize the context->curr_stack_size = 0;
+        -- 3. initialize the collection which are the local vars, e.g. a locally declared array
+        --  int a[3];
+        -- will be reinitialized as ctxt->a_0 = (int *)malloc(sizeof(int)*3);
+        [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (var `app` (iid $ labPref ++ "0" ))) .=. rhs)) N.undefNode) 
+        | scopedDecl <- scopedDecls
+        , isJust (containerDeclToInit scopedDecl)
+        , let (Just (var,rhs)) = containerDeclToInit scopedDecl ] ++ 
+        
+        -- 4. initialize the context->curr_stack_size = 0;
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (iid currStackSizeName) .=. (AST.CConst (AST.CIntConst (cInteger 0) N.undefNode))))) N.undefNode) ] ++ 
-        -- calling block 0
+        -- 3. calling block 0
         [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
                                            [ AST.CUnary AST.CAdrOp (AST.CVar ((iid funName) `app` (iid "id")) N.undefNode) N.undefNode
                                            , AST.CVar (iid ctxtParamName) N.undefNode ] N.undefNode)) N.undefNode)
@@ -673,6 +682,23 @@ ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         }
   in CPS main_decls main_stmts funcSignatures (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])  context main_func 
      
+-- ^ turn an scope declaration into a rhs initalization.     
+containerDeclToInit :: AST.CDeclaration N.NodeInfo -> Maybe (Ident, AST.CExpression N.NodeInfo)
+containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of 
+  { (Just decl@(AST.CDeclr (Just arrName) [arrDecl] _ _ _), _, _):_ -> 
+       case arrDecl of 
+         { AST.CArrDeclr _ (AST.CArrSize _ size) _ -> 
+              let 
+                ptrToTy = AST.CDecl typespecs [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+                malloc = AST.CCall (AST.CVar (iid "malloc") N.undefNode) 
+                         [AST.CBinary AST.CMulOp (AST.CSizeofType (AST.CDecl typespecs [] N.undefNode) N.undefNode) size N.undefNode] N.undefNode
+                cast = AST.CCast ptrToTy malloc N.undefNode
+              in Just (arrName, cast)
+         ; _ -> Nothing
+         }
+  ; _ -> Nothing
+  }
+  
 -- ^ get all visitor labels from te labeledblocks map     
 allVisitors :: SDom -> M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
 allVisitors sdom lbs = M.fromList $  -- l is a visitor label if (1) succ of l, say l1 is loop, (2) l2, the then-branch label of l1 is sdom'ing l
