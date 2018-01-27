@@ -24,8 +24,9 @@ static char * ast_for_expr(const node * n)
 	  n = &n->n_child[0]; // 4
             goto loop;
         }
+      // 5
     }
-  return 0; // 5
+  return 0; // 6
 }
 
 int main() {
@@ -42,3 +43,35 @@ int main() {
   printf("%s",ast_for_expr(p));
   return 0;
 }
+
+/*
+  0
+  |
+  v
+  loop<----
+  |       |
+  v       |
+  1-->3-->4
+  |   |
+  v   v
+  2   5
+  |   |
+  v   v
+ -1<--6
+     
+
+  
+dom tree
+
+    0
+   / \
+loop -1
+  |
+  1
+ / \
+2   3
+   / \
+  4   5
+      |
+      6
+ */

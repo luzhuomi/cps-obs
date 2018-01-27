@@ -534,9 +534,10 @@ buildSSA cfg fargs =
                  in ssa{ labelled_blocks = M.insert currLbl labelled_block (labelled_blocks ssa)
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             }
-          -- io = unsafePerformIO $ print (map (\var -> (var, modLoc var cfg)) allVarsUsed) >> print dtree >> print dft >> print pcm >> print sdom
           ssa = foldl eachNode (SSA [] M.empty sdom allLocalVars formalArguments) $ M.toList cfg
-      in ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
+          io = unsafePerformIO $ print cfg >> print ssa -- (map (\var -> (var, modLoc var cfg)) allVarsUsed) >> print dtree >> print dft >> print pcm >> print sdom
+          
+      in io `seq` ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
     }
 
 
