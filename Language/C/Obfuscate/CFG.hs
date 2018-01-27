@@ -7,6 +7,7 @@ module Language.C.Obfuscate.CFG
 
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.List (nub)
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -270,7 +271,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
             cfgNode    = Node [s] lhs rhs [] preds0 [] Neither
-            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
@@ -301,7 +302,7 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
             currNodeId = internalIdent (labPref++show max)          
             max1       = max + 1
             cfgNode    = Node [s] [] rhs [] preds0 [] Neither
-            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
@@ -329,7 +330,7 @@ CFG, max, preds, continuable |- { stmt1, ..., stmtN } => CFG', max', preds', con
               cfg0       = cfg st 
               preds0     = currPreds st
               cfgNode    = Node [] lhs rhs [] preds0 [] Neither
-              cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+              cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
               cfg1       = M.insert currNodeId cfgNode cfg1'
         ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
         }
@@ -361,7 +362,7 @@ CFG, max, preds, _ |- if exp { trueStmt } else { falseStmt }  => CFG3, max3, pre
                  -- we can give an empty statement to the new CFG node in CFG1 first and update it
                  -- after we have max2,
                  cfgNode    = Node [] lhs rhs [] preds0 [] Neither
-                 cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+                 cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
                  cfg1       = M.insert currNodeId cfgNode cfg1'
                               
            ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
@@ -417,7 +418,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
           -- we can give an empty statement to the new CFG node in CFG1 first and update it
           -- after we have max2,          
           cfgNode = Node [] lhs rhs [] preds0 [] Neither
-          cfg1'   = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0 
+          cfg1'   = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0 
           cfg1    = M.insert currNodeId cfgNode cfg1'
     ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False, breakNodes = [], caseNodes = [] }
     ; buildCFG swStmt
@@ -467,7 +468,7 @@ CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2,
           -- we can give an empty statement to the new CFG node in CFG1 first and update it
           -- after we have max2,
           cfgNode    = Node [] lhs rhs [] preds0 [] (IsLoop [] [])
-          cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+          cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
           cfg1       = M.insert currNodeId cfgNode cfg1'
     ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False, contNodes = [], breakNodes = []}
     ; buildCFG stmt 
@@ -478,13 +479,13 @@ CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2,
                       (AST.CGoto (internalIdent (labPref ++ show max1)) nodeInfo) 
                       (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo
           cfg2      = cfg st1
-          cfg2'     = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg2 preds1
+          cfg2'     = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg2 preds1
           breakNodes2 = breakNodes st1
           contNodes2  = contNodes st1
           -- add the stmt back to the curr node (If statement)
-          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, succs=(succs n)++[internalIdent (labPref++show max2)], switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2'  -- preds n == preds0, preds1 are exits nodes from the loop body, contNodes2 are the continuation nodes from loop body,
-          cfg3       = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) l g) cfg2'' contNodes2 -- update the break and cont immediately
-          cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
+          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, succs=nub $ (succs n)++[internalIdent (labPref++show max2)], switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2'  -- preds n == preds0, preds1 are exits nodes from the loop body, contNodes2 are the continuation nodes from loop body,
+          cfg3       = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) l g) cfg2'' contNodes2 -- update the break and cont immediately
+          cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
     ; put st1{cfg = cfg3', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
     }
 {-  
@@ -557,7 +558,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
         let cfg0       = cfg st 
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CGoto ident nodeInfo
-            cfg1      = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ]}) pred g) cfg0 preds0
+            cfg1      = foldl (\g pred -> M.update (\n -> Just n{stmts=(stmts n) ++ [ s ], succs=nub $ (succs n) ++ [ident]}) pred g) cfg0 preds0
         in do 
           { put st{cfg = cfg1, currPreds=[], continuable = False} }
       else 
@@ -568,7 +569,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
             preds0     = currPreds st
             s          = AST.CBlockStmt $ AST.CGoto ident nodeInfo
             cfgNode    = Node [s] [] [] [] preds0 [ident] Neither
-            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
           {  put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False} }
@@ -604,7 +605,7 @@ CFG, max, preds, false, contNode, breakNodes |- continue =>  CFG1, max1, {max}, 
             preds0 = currPreds st
             s      = AST.CBlockStmt $ AST.CCont nodeInfo
             cfgNode = Node [s] [] [] [] preds0 [] Neither
-            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
             cfg1  = M.insert currNodeId cfgNode cfg1'
         in do 
           { put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False, contNodes = (contNodes st) ++ [currNodeId] } }
@@ -639,7 +640,7 @@ CFG, max, preds, false, contNodes, breakNodes |- continue =>  CFG1, max1, {max},
             preds0 = currPreds st
             s      = AST.CBlockStmt $ AST.CBreak nodeInfo
             cfgNode = Node [s] [] [] [] preds0 [] Neither
-            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+            cfg1' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
             cfg1  = M.insert currNodeId cfgNode cfg1'
         in do 
           { put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False, breakNodes = (breakNodes st) ++ [currNodeId] } }
@@ -674,7 +675,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
             preds0     = currPreds st
             s          = AST.CBlockStmt  $ AST.CReturn mb_expression modeInfo
             cfgNode    = Node [s] lhs rhs [] preds0 [] Neither
-            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
           {  put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False} }
@@ -728,7 +729,7 @@ CFG, max, preds, false |- ty x = exp[] => CFG1, max1, [], false
             rvars      = getRHSVarsFromDecl divs
             cfgNode    = Node [s] lvars rvars lvars preds0 [] Neither
             cfg1'      = foldl (\g pred -> 
-                                 M.update (\n -> Just n{succs = (succs n)++[currNodeId]} ) pred g) cfg0 preds0
+                                 M.update (\n -> Just n{succs = nub $ (succs n)++[currNodeId]} ) pred g) cfg0 preds0
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do 
           {  put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }

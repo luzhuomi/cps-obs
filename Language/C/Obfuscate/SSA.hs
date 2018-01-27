@@ -209,11 +209,13 @@ buildDF' (dtree, pcm, sdom, cfg) =
         ; Just n  ->
              let bs    = succs n
                  idoms = idom dft
-             in concatMap (\b -> case M.lookup b idoms of
+                 df1 = concatMap (\b -> case M.lookup b idoms of
                               { Nothing               -> [b] -- shouldn't be [], b has no idoms, means it is 0
                               ; Just idom | a == idom -> []
                                           | otherwise -> [b]
                               }) bs
+                 -- io = unsafePerformIO $ print a >> print idoms >> print bs >> print df1                       
+             in df1
         }
 
       findDFup :: Ident -> DFTable -> [Ident]
@@ -535,9 +537,9 @@ buildSSA cfg fargs =
                        , scoped_decls    = (scoped_decls ssa) ++ new_decls }
             }
           ssa = foldl eachNode (SSA [] M.empty sdom allLocalVars formalArguments) $ M.toList cfg
-          io = unsafePerformIO $ print cfg >> print ssa -- (map (\var -> (var, modLoc var cfg)) allVarsUsed) >> print dtree >> print dft >> print pcm >> print sdom
+          io = unsafePerformIO $ print cfg >> print ssa  >> print dft >> print pcm >> print dtree -- (map (\var -> (var, modLoc var cfg)) allVarsUsed) >> print dtree >> print dft >> print pcm >> print sdom
           
-      in io `seq` ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
+      in ssa   -- the scoped_decls were not yet renamed which will be renamed in SSA to CPS convertion
     }
 
 
