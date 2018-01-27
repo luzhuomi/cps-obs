@@ -89,7 +89,7 @@ loop -1
 ----------------------------------------------------------
  3 |4,5   |  1   |     |      | 
 ----------------------------------------------------------
- 4 |loop  |  3   |loop |      |loop 
+ 4 |loop  |  3   |loop |loop  |loop 
 ----------------------------------------------------------
  5 | 6    |  3   |     |      |  
 ----------------------------------------------------------
@@ -112,5 +112,19 @@ Hence DF1 can be computed easily via the following
 
 DFup(a) is the upwards dominance frontier for node a.
 DFup(a) = { b | b \in DF(a), not (idom(a) sdom b) }
+
+
+Similar to DF1
+DFup can be computed easily via the following
+ DFup(a) = { b | b \in DF(a), idom(a) = c, idom(b) != c }
+
+
+DF(a) is the dominance frontier for node a.
+
+DF(a) = DF1(a) \union { b | c \in child(a), b \in DF(c), not (a sdom b) }
+
+
+Lemma: Let a be a leaf node in dom tree, then DF(a) == DF1(a)
+
 
  */
