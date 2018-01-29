@@ -1,4 +1,3 @@
-# cpp-obs
 # Building 
 ```bash
 $ cabal configure
@@ -43,5 +42,5 @@ Parse Error: /usr/include/stdio.h:133: (column 19) [ERROR]  >>> Syntax Error !
 Install gcc from brew.
 ```
 $ brew install gcc 
-``
+```
 Then set the gcc in config.yaml as /usr/local/bin/gcc-7
