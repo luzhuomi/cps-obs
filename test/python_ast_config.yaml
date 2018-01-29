@@ -51,24 +51,24 @@ whitelist:
     - ast_for_try_stmt
     - ast_for_with_item
     - ast_for_classdef
-    - ast_for_stmt
     - parsenumber
     - decode_utf8
     - decode_unicode
-
+    - parsestrplus
+    - ast_for_stmt    
+    - ast_for_expr
 # blacklist has no effect for now
 blacklist:
+    - num_stmts (segfault)
+    - PyAST_FromNode (segfault)
+    - parsestr (segfault)
+    - ast_for_suite (segfault)
+    - ast_for_print_stmt (system error unhandled expr 12)
+    - ast_for_atom (system error unhandled expr 11)
+    - parsestrplus (Assertion failed)
     - ast_for_power (Assertion failed)
-    - num_stmts (segfault import error)
-    - PyAST_FromNode (bus error)
-    - ast_for_atom (segfault import error)
-    - ast_for_expr (loop forever)
-    - alias_for_import_name (loop forever)
-    - ast_for_import_stmt (assertion fail)
-    - ast_for_suite (segfault import error)
-    - ast_for_if_stmt (segfault import error)
-    - ast_for_print_stmt (run-time error empty print out)
-    - ast_for_with_stmt (segfault import error)
-    - parsestr (segfault import error)
-    - parsestrplus (segfault import error)
-    
+    - ast_for_expr (Assertion failed)
+    - ast_for_with_stmt (Assertion failed)
+    - ast_for_import_stmt (Assertion failed)
+    - alias_for_import_name (memory error)
+    - ast_for_if_stmt (ValueError unknown major BerkeleyDB version failed to handle python if stmt)
