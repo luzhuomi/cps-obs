@@ -9,7 +9,7 @@ $ cabal build
 ./dist/build/cpp-obs/cpp-obs test/fibiter.c fibiter_obfs.c
 ```
 # Configuration
-cpp-obs expects a config.yaml to be placed in the source code (.c file) directory. 
+cpp-obs expects a config.yaml to be placed in the currnt working directory. 
 ## gcc 
 gcc defines the preprocessor. For instance, for linux, 
 ```
