@@ -1,0 +1,8 @@
+# location of the preprocessor
+gcc: /usr/local/bin/gcc-7
+
+# functions to be obfusicated
+whitelist: [] 
+
+# blacklist has no effect for now
+blacklist: []

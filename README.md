@@ -13,11 +13,15 @@ cpp-obs expects a config.yaml to be placed in the currnt working directory.
 ## gcc 
 gcc defines the preprocessor. For instance, for linux, 
 ```
-- gcc: gcc
+gcc: gcc
 ```
 for Mac OSX, install gcc via homebrew and
 ```
-- gcc : /usr/local/bin/gcc-7
+gcc: /usr/local/bin/gcc-7
+```
+for Windows, install Visual Studio and
+```
+gcc: cc  
 ```
 ## whitelist 
 whitlelist defines the list of functions to be obfuscated. If whitelist is left as an empty list, all functions will be obfuscated, except for main function and the inlined functions. 
@@ -34,6 +38,7 @@ asmbly statement not supported.
 CallStack (from HasCallStack):
   error, called at Main.hs:41:51 in main:Main
 ```
+To fix it, install visual studio and set the gcc in config.yaml, refer to the Configuration section above.
 ## Mac OS X, we might encounter
 ```
 Parse Error: /usr/include/stdio.h:133: (column 19) [ERROR]  >>> Syntax Error !
@@ -44,4 +49,4 @@ Install gcc from brew.
 ```
 $ brew install gcc 
 ```
-Then set the gcc in config.yaml as /usr/local/bin/gcc-7
+Then set the gcc in config.yaml to /usr/local/bin/gcc-7, refer to Configuration section above.

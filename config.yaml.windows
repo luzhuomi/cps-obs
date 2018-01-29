@@ -1,0 +1,8 @@
+# location of the preprocessor
+gcc: cc
+
+# functions to be obfusicated
+whitelist: [] 
+
+# blacklist has no effect for now
+blacklist: []
