@@ -1,5 +1,6 @@
 # Building 
 ```bash
+$ cabal install language-c yaml
 $ cabal configure
 $ cabal build
 ```
