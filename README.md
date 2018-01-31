@@ -50,3 +50,6 @@ Install gcc from brew.
 $ brew install gcc 
 ```
 Then set the gcc in config.yaml to /usr/local/bin/gcc-7, refer to Configuration section above.
+
+## Ubuntu 17.10 with glibc 2.26
+Due to the parser limtation, it is not yet supported. 
