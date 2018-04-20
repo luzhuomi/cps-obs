@@ -54,11 +54,12 @@ whitelist:
     - parsenumber
     - decode_utf8
     - decode_unicode
-    - parsestrplus
-    - ast_for_stmt    
-    - ast_for_expr
+
 # blacklist has no effect for now
 blacklist:
+    - parsestrplus
+    - ast_for_expr
+    - ast_for_stmt    
     - num_stmts (segfault)
     - PyAST_FromNode (segfault)
     - parsestr (segfault)
