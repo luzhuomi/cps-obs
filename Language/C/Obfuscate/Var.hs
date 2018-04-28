@@ -14,6 +14,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
+import qualified Language.C.Data.Position as Pos 
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
@@ -533,7 +534,7 @@ unApp (Ident s1 hash1 nodeInfo1) =
 
 
 -- split a declaration into the declaration and a assignment statement
-splitDecl :: AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
+splitDecl :: (Pos.Pos a) => AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
 splitDecl decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> 
          let getLVal mb_decltr = case mb_decltr of 
@@ -557,7 +558,7 @@ splitDecl decl = case decl of
                                                assignmt = AST.CAssign op lval rval nodeInfo1
                                            in [ AST.CExpr (Just assignmt) nodeInfo ] 
                                       }
-                               ; Just (AST.CInitList iList nodeInfo1) -> error "todo: splitDecl init list is not supported" -- todo: can we do this in an assignment?
+                               ; Just (AST.CInitList iList nodeInfo1) -> error $ "todo:  splitDecl init list is not supported " ++ show (Pos.posOf nodeInfo1) -- todo: can we do this in an assignment?
                                }
                        in (ts ++ [new_tripl], ss ++ new_stmts )
                      ) ([],[]) tripls 
