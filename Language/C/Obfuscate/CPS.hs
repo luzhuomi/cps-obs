@@ -440,14 +440,23 @@ fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(()
 --        we need to check whether l1 sdom l3, if so, replace "goto l"  by (*k())
   | inDelta = 
     let exp' = cps_trans_exp localVars fargs ctxtName exp
-        lbl_tr = case trueStmt of 
-          { AST.CGoto lbl _ -> lbl 
+        (lbl_tr, lb_tr) = case trueStmt of 
+          { AST.CGoto lbl _ -> case M.lookup lbl lb_map of 
+               { Nothing -> error "cps_trans_stmt error: label block is not found in the true statement in a loop."
+               ; Just lb -> (lbl, lb)
+               }
           ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
           }
-        lbl_fl = case mbFalseStmt of 
-          { Just (AST.CGoto lbl _) -> lbl
+        asgmts_tr = cps_trans_phis ctxtName ident lbl_tr (lb_phis lb_tr)
+        (lbl_fl, lb_fl) = case mbFalseStmt of 
+          { Just (AST.CGoto lbl _) -> case M.lookup lbl lb_map of 
+               { Nothing -> error "cps_trans_stmt error: label block is not found in the false statement in a loop."
+               ; Just lb -> (lbl, lb)
+               }
           ; _ -> error "cps_trans_stmt error: the false statement in a looping if statement does not contain goto"
           }
+        asgmts_fl = cps_trans_phis ctxtName ident lbl_fl (lb_phis lb_fl)
+        -- supposed to push asgmts_tr and asgmnts_fl to before f_l1 and f_l2, but does not work here.
         push_args :: [AST.CExpression N.NodeInfo]
         push_args = [ AST.CUnary AST.CAdrOp (cvar $ fname `app` (iid "cond") `app` ident) N.undefNode
                     , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_tr)) N.undefNode
