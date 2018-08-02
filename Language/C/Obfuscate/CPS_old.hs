@@ -27,6 +27,12 @@ import System.IO.Unsafe (unsafePerformIO)
 
 
 -- TODO LIST:
+-- 1. check whether k vs kParam (done)
+-- 2. id, loop an loop lambda (done)
+-- 3. pop and push (done)
+-- 4. function signatures (done)
+-- 5. max stack size
+-- 6. curr_stack_size + 1 or - 1
 
 testCPS = do 
   { let opts = []
@@ -63,6 +69,52 @@ prettyCPS cps =
   in render $ pretty (AST.CTranslUnit (declExts ++ funDeclExts) N.undefNode)
 
 
+
+{- Source Language SSA
+
+(Prog)  p ::= t x (\bar{t x}) {\bar{d}; \bar{b} }
+
+(Decl)  d ::= t x
+
+(Block) b ::= l: {s} | l: {\bar{i} ; s} 
+
+(Stmts) s ::= x = e; s | goto l; | return e; | e; s | if e { s } else { s } 
+
+(Phi)   i ::= x = \phi(\bar{g})
+
+(Exp)   e ::= v | e (\bar{e})
+
+(Labelled argument) g ::= (l:e)
+
+(Label) l ::= l0 | ... | ln
+
+(Value) v ::= x | c
+
+(Type)  t ::= int | bool | t* | t[] | | void
+
+(Loop environment) \Delta ::= (l_if, e_cond, l_true, l_false)
+-}
+
+-- was imported from SSA
+
+{- Target Language CPS
+(Prog)  P ::= T X (\bar{T X}) {\bar{D}; \bar{B} }
+
+(Block) B ::= S
+
+(Decl)  D ::= T X | P /* nested functions */
+
+(Stmts)  S ::= X = E ; S | return E; | E; S |  if E { S } else { S } 
+
+(Exp) E ::=  V | E(\bar{E})
+
+(Value) V :: = X | C | (\bar{T X}):T => {\bar{D}; \bar{B}}
+
+(Variable) X ::= x | y | k | ...
+
+(Type) T :: = int | bool | T * | T => T | T[] | void
+-}
+
 -- ^ a CPS function declaration AST
 data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function decls
                , cps_stmts :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main function stmts
@@ -72,69 +124,12 @@ data CPS = CPS { cps_decls :: [AST.CCompoundBlockItem N.NodeInfo]  -- ^ main fun
                , cps_main ::  AST.CFunctionDef N.NodeInfo -- ^ the main function
                } deriving Show
                           
--- global (parameter) name prefices
-
-bindName = "bind"
-bindPushName = "bind_push"
-bindPeekMName = "bind_peek_m"
-bindPeekFName = "bind_peek_f"
-bindPopName = "bind_pop"
-lambdaBindName = "lambda_bind"
-
-ifcCondName = "ifcCond"
-ifcTrName = "ifcTr"
-ifcFlName = "ifcFl"
-ifcName   = "ifc"
-
-ifcPushName = "ifc_push"
-ifcPeekCName = "ifc_peek_c"
-ifcPeekTrName = "ifc_peek_tr"
-ifcPeekFlName = "ifc_peek_fl"
-ifcPopName = "ifc_pop"
-lambdaIfcName = "lambda_ifc"
-
-
-loopCondName = "loopCond"
-loopVisitName = "loopVisit"
-loopExitName = "loopExit"
-loopName   = "loop"
-
-loopPushName = "loop_push"
-loopPeekCName = "loop_peek_c"
-loopPeekVName = "loop_peek_v"
-loopPeekEName = "loop_peek_e"
-loopPopName = "loop_pop"
-lambdaLoopName = "lambda_loop"
-
-
-kPeekName = "k_peek"
-kPopName = "k_pop"
-
-
-retName = "ret"
-
-ctxt_arr_void = "ctxt_arr_void"
-
-ctxtParamName = "ctxtParam"                          
-
+-- global names                          
 kParamName = "kParam"
-mParamName = "mParam"
-fParamName = "fParam"
-
+ctxtParamName = "ctxtParam"                          
 condParamName = "condParam"
 visitorParamName = "visitorParam"
 exitParamName = "exitParam"
-trueParamName = "trueParam"
-falseParamName = "falseParam"
-
-kStackTop = "k_stack_top"
-loopStackTop = "loop_stack_top"
-condStackTop = "cond_stack_top"
-bindStackTop = "bind_stack_top"
-
-
-
--- todo : remove
 currStackSizeName = "curr_stack_size"
 
 {-
@@ -201,6 +196,10 @@ t[] => T*
 void => void
 -}
                    
+{-                    
+instance CPSize (AST.CDeclarationSpecifier N.NodeInfo) (AST.CDeclarationSpecifier N.NodeInfo) where
+  cps_trans tyspec = tyspec -- todo: unroll it
+-}
 {-
 data CDeclarationSpecifier a
   = CStorageSpec (CStorageSpecifier a) -- ^ storage-class specifier or typedef
@@ -217,6 +216,12 @@ data CDeclarationSpecifier a
 x => X
 -}
 
+{-
+instance CPSize (AST.CDeclarator N.NodeInfo) (AST.CDeclarator N.NodeInfo) where
+  cps_trans declr@(AST.CDeclr mb_ident derivedDecltrs mb_cstrLtr attrs nodeInfo) = declr 
+-}
+
+
 
 -- fn, K, \bar{\Delta} |- \bar{b} => \bar{P}
 --translating the labeled blocks to function decls
@@ -232,359 +237,71 @@ type ContextName = String
 type Visitors = M.Map Ident Ident -- ^ last label of the visitor -> label of the loop
 type Exits    = M.Map Ident Ident -- ^ label of the exit -> label of the loop
 
+cps_trans_lbs :: Bool -> -- ^ is return void
+                 S.Set Ident -> -- ^ local vars
+                 S.Set Ident -> -- ^ formal args
+                 ContextName -> 
+                 Ident ->  -- ^ top level function name
+                 -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                 Visitors ->
+                 Exits ->                 
+                 M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                 [AST.CFunctionDef N.NodeInfo] 
+cps_trans_lbs isReturnVoid localVars fargs ctxtName fname visitors exits lb_map = 
+  map (\(id,lb) -> cps_trans_lb isReturnVoid localVars fargs  ctxtName fname lb_map id visitors exits lb) (M.toList lb_map)
 
--- CL_cps
+{- fn, \bar{\Delta}, \bar{b}  |- b => P -}
+
+
 cps_trans_lb :: Bool -> -- ^ is return void
                 S.Set Ident -> -- ^ local vars
                 S.Set Ident -> -- ^ formal args
                 ContextName -> 
                 Ident ->  -- ^ top level function name
-                -- 
-                Ident ->  -- ^ label for the current block                
-                M.Map Ident LabeledBlock ->  -- ^ KEnv
-                SSA -> -- ^ functions as the cfg
-                ([AST.CFunctionDef N.NodeInfo], AST.CExpression N.NodeInfo)
+                -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
+                M.Map Ident LabeledBlock ->  -- ^ \bar{b}
+                Ident ->  -- ^ label for the current block
+                Visitors ->
+                Exits ->                
+                LabeledBlock ->  -- ^ the block
+                AST.CFunctionDef N.NodeInfo
 
-cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_i kenv cfg = 
-  case adjacent cfg l_i of 
-    { [ l_j ] -> 
 {-
--- in target langauge
-CL_cps l_i kenv cfg 
-   | \exists l_j: (l_i,l_j) \in cfg /\ 
-     \not (\exists l_k : l_j \= l_k /\ (l_i, l_k) \in cfg) 
-   = (D::\overline{D}, bind(f_i,E))  
-   where (\overline{D}, E) = CL_cps l_j kenv cfg
-         (\overline{phi}, s) = kenv l_i
-         k is a fresh variable
-         S = CS_cps s kenv l_i k
-         D = (void => void) => void f_i = (void => void k) => { S }
--- in c 
-CL_cps l_i kenv cfg 
-   | \exists l_j: (l_i,l_j) \in cfg /\ 
-     \not (\exists l_k : l_j \= l_k /\ (l_i, l_k) \in cfg) 
-   = (D::Bind_i::\overline{D}, bind_i) 
-   where (\overline{D}, E) = CL_cps l_j kenv cfg
-         (\overline{phi}, s) = kenv l_i
-         k is a fresh variable
-         S = CS_cps s kenv l_i k
-         D = void f_i (ctxt* c) { S }
-         Bind_i = void bind_i (ctxt* c) { bind_push(&f_i, E, c); lambda_bind(c); }
+
+fn, k, \bar{\Delta}, \bar{b} |- s => S
+----------------------------------------------------------------- (LabBlk)
+fn, \bar{\Delta}, \bar{b}  |- l_i : {s} => void fn_i(void => void k) { S } 
+
+fn, k, \bar{\Delta}, \bar{b} |- s => S
+--------------------------------------------------------------------------- (PhiBlk)
+fn, \bar{\Delta}, \bar{b}  |- l_i : {\bar{i}; s} => void fn_i(void => void k) { S }
+
 -}
 
-         let f_iname = fname `app` l_i
-             tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
-             declrs = []
-             paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                         [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-             paramDeclr = [paramCtxt]      
-             decltrs = [AST.CFunDeclr (Right (paramDeclr,False)) [] N.undefNode] 
-             mb_strLitr = Nothing
-             attrs  =  []
-             
-             k      = iid kParamName
-             
-             lb     = fromJust (M.lookup l_i kenv)
-             stmt' =  AST.CCompound [] ((cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k kenv l_i (lb_stmts lb)) {- ++ [peek, pop, kApp] -}) N.undefNode 
-             f_iD   = AST.CFunDef tyVoid (AST.CDeclr (Just f_iname) decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
-                          
-             (ds,e) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv cfg
-             -- NOTE: each bind, loop and ifc, ret operators need to be "qualified" by the function name
-             bind  = fname `app` iid bindName
-             bindpush = fname `app` iid bindPushName
-             lambdabind = fname `app` iid lambdaBindName
-             bind_i = bind `app` l_i
-             bindPush = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` bindpush)) [ (adr $ cvar f_iname), (adr e),(cvar $ iid ctxtParamName)] N.undefNode)) N.undefNode) -- bind_push(&f_i, &e, ctxt)
-             lambdaBindApp = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` lambdabind)) [(cvar $ iid ctxtParamName)] N.undefNode)) N.undefNode) -- lambdaBind(ctxt)
-             bindStmt = AST.CCompound [] [ bindPush, lambdaBindApp] N.undefNode
-             bind_iD = AST.CFunDef tyVoid (AST.CDeclr (Just bind_i) decltrs mb_strLitr attrs N.undefNode) declrs bindStmt N.undefNode
-             
-        in (f_iD:bind_iD:ds, cvar bind_i) 
-    ; [ l_j, l_k ] | pathExists cfg l_j l_i && pathExists cfg l_k l_i -> error "syntactic non-terminalting loop" 
-    ; [ l_j, l_k ] | pathExists cfg l_j l_i -> 
-{-
--- in target langauge
-CL_cps l_i kenv cfg 
-   | \exists l_j, l_k: l_j \= l_k /\ (l_i,l_j) \in cfg /\ (l_i, l_k) \in cfg 
-     /\ \exists l' : (l_j, l', l_i) \in cfg 
-     /\ \not (\exists  l'' : (l_k, l'', l_i) \in cfg)
-   = (\overline{D_j} ++ \overline{D_k}, loop( () => { return E}, E_j,E_k ))  
-   where (\overline{\phi}, if e { goto l_j; } else { goto l_k; }) = kenv(l_i)
-         (\overline{D_j}, E_j) = CL_cps l_j kenv cfg
-         (\overline{D_k}, E_k) = CL_cps l_k kenv cfg
-         E = CE_cps e
--- in c 
-CL_cps l_i kenv cfg 
-   | \exists l_j, l_k: l_j \= l_k /\ (l_i,l_j) \in cfg /\ (l_i, l_k) \in cfg 
-     /\ \exists l' : (l_j, l', l_i) \in cfg 
-     /\ \not (\exists  l'' : (l_k, l'', l_i) \in cfg)
-   = (\overline{D_j} ++ \overline{D_k}, loop( () => { return E}, E_j,E_k ))  
-   where (\overline{\phi}, if e { goto l_j; } else { goto l_k; }) = kenv(l_i)
-         (\overline{D_j}, E_j) = CL_cps l_j kenv cfg
-         (\overline{D_k}, E_k) = CL_cps l_k kenv cfg
-         E = CE_cps e
-         LoopCond_i = int loopCond_i (ctxt* c) { return E;}
-         LoopVisit_i = void loopExit_i (ctxt* c) { (CF_cps l_i l_j); return E_j; }
-         LoopExit_i = void loopExit_i (ctxt* c) { (CF_cps l_i l_k); return E_k; }
-         Loop_i = void loop_i (ctxt* c) { loop_push(&loopCind_i, &loopVisit_i, &Loop_Exit_i, c); lambda_loop(c); }
--}           
-           case M.lookup l_i kenv of 
-             { Just n -> case lb_stmts n of  
-                  { [ AST.CBlockStmt 
-                      (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
-                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv cfg
-                           (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv cfg
-                           exp'      = cps_trans_exp localVars fargs ctxtName exp
-                           tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
-                           tyInt     = [AST.CTypeSpec (AST.CIntType N.undefNode)]
-                           declrs = []
-                           paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                                       [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-                           paramDeclr = [paramCtxt]      
-                           decltrs    = [AST.CFunDeclr (Right (paramDeclr,False)) [] N.undefNode] 
-                           mb_strLitr = Nothing
-                           attrs      =  []
-                           
-                           loopCond   = fname `app` iid loopCondName
-                           loopCond_i  = loopCond `app` l_i 
-                           loopCondStmt = AST.CCompound [] [AST.CBlockStmt (AST.CReturn (Just exp') N.undefNode)] N.undefNode
-                           loopCond_iD = AST.CFunDef tyInt (AST.CDeclr (Just loopCond_i) decltrs mb_strLitr attrs N.undefNode) declrs loopCondStmt N.undefNode
-                           
-                           loopVisit   = fname `app` iid loopVisitName
-                           loopVisit_i = loopVisit `app` l_i
-                           
-                           loopVisitPhis = case M.lookup l_j kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_j (lb_phis n)
-                             }
-                           loopVisitStmt = AST.CCompound [] (loopVisitPhis ++ [AST.CBlockStmt (AST.CReturn (Just e_j) N.undefNode)]) N.undefNode 
-                           loopVisit_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loopVisit_i) decltrs mb_strLitr attrs N.undefNode) declrs loopVisitStmt N.undefNode
-                           
-                           
-                           loopExit    = fname `app` iid loopExitName
-                           loopExit_i  = loopExit `app` l_i
-                           loopExitPhis = case M.lookup l_k kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_k (lb_phis n)
-                             } 
-                           loopExitStmt = AST.CCompound [] (loopExitPhis ++ [AST.CBlockStmt (AST.CReturn (Just e_k) N.undefNode)]) N.undefNode 
-                           loopExit_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loopExit_i) decltrs mb_strLitr attrs N.undefNode) declrs loopExitStmt N.undefNode
 
-                           
-                           loop        = fname `app` iid loopName
-                           loop_i      = loop `app` l_i
-                           loopPush    = fname `app` iid loopPushName
-                           lambdaloop  = fname `app` iid lambdaLoopName
-                           loopStmt    = AST.CCompound [] 
-                                        [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` loopPush)) [ (adr (cvar loopCond_i)), (adr (cvar loopVisit_i)), (adr (cvar loopExit_i)), (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode)
-                                        , (AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` lambdaloop)) [ (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode))
-                                        ] 
-                                        N.undefNode
-                           loop_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loop_i) decltrs mb_strLitr attrs N.undefNode) declrs loopStmt N.undefNode
-                       in ([loopCond_iD, loopVisit_iD, loopExit_iD, loop_iD] ++ d_j ++ d_k, cvar loop_i)
-
-                  ; _ -> error "not possible"
-                  }
-             ; _ -> error "not possible"
-             } 
-                                               
-    ; [ l_j, l_k ] | pathExists cfg l_k l_i ->  -- same as the above case, just swapping k and j 
-           case M.lookup l_i kenv of 
-             { Just n -> case lb_stmts n of  
-                  { [ AST.CBlockStmt 
-                      (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
-                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv cfg
-                           (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv cfg
-                           exp'      = cps_trans_exp localVars fargs ctxtName exp
-                           tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
-                           tyInt     = [AST.CTypeSpec (AST.CIntType N.undefNode)]
-                           declrs = []
-                           paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                                       [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-                           paramDeclr = [paramCtxt]      
-                           decltrs    = [AST.CFunDeclr (Right (paramDeclr,False)) [] N.undefNode] 
-                           mb_strLitr = Nothing
-                           attrs      =  []
-                           
-                           loopCond   = fname `app` iid loopCondName
-                           loopCond_i  = loopCond `app` l_i 
-                           loopCondStmt = AST.CCompound [] [AST.CBlockStmt (AST.CReturn (Just exp') N.undefNode)] N.undefNode
-                           loopCond_iD = AST.CFunDef tyInt (AST.CDeclr (Just loopCond_i) decltrs mb_strLitr attrs N.undefNode) declrs loopCondStmt N.undefNode
-                           
-                           loopVisit   = fname `app` iid loopVisitName
-                           loopVisit_i = loopVisit `app` l_i
-                           
-                           loopVisitPhis = case M.lookup l_k kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_k (lb_phis n)
-                             }
-                           loopVisitStmt = AST.CCompound [] (loopVisitPhis ++ [AST.CBlockStmt (AST.CReturn (Just e_k) N.undefNode)]) N.undefNode 
-                           loopVisit_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loopVisit_i) decltrs mb_strLitr attrs N.undefNode) declrs loopVisitStmt N.undefNode
-                           
-                           
-                           loopExit    = fname `app` iid loopExitName
-                           loopExit_i  = loopExit `app` l_i
-                           loopExitPhis = case M.lookup l_j kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_j (lb_phis n)
-                             } 
-                           loopExitStmt = AST.CCompound [] (loopExitPhis ++ [AST.CBlockStmt (AST.CReturn (Just e_j) N.undefNode)]) N.undefNode 
-                           loopExit_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loopExit_i) decltrs mb_strLitr attrs N.undefNode) declrs loopExitStmt N.undefNode
-
-                           
-                           loop        = fname `app` iid loopName
-                           loop_i      = loop `app` l_i
-                           loopPush    = fname `app` iid loopPushName
-                           lambdaloop  = fname `app` iid lambdaLoopName
-                           loopStmt    = AST.CCompound [] 
-                                        [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` loopPush)) [ (adr (cvar loopCond_i)), (adr (cvar loopVisit_i)), (adr (cvar loopExit_i)), (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode)
-                                        , (AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` lambdaloop)) [ (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode))
-                                        ] 
-                                        N.undefNode
-                           loop_iD = AST.CFunDef tyVoid (AST.CDeclr (Just loop_i) decltrs mb_strLitr attrs N.undefNode) declrs loopStmt N.undefNode
-                       in ([loopCond_iD, loopVisit_iD, loopExit_iD, loop_iD] ++ d_j ++ d_k, cvar loop_i)
-
-                  ; _ -> error "not possible"
-                  }
-             ; _ -> error "not possible"
-             }            
-           
-    ; [ l_j, l_k ] | otherwise -> 
-{-
--- in target langauge
-CL_cps l_i kenv cfg 
-   | \exists l_j, l_k: l_j \= l_k /\ (l_i,l_j) \in cfg /\ (l_i, l_k) \in cfg 
-     /\ \not (\exists  l' : (l_j, l', l_i) \in cfg \/ (l_k, l', l_i) \in cfg)
-   = (\overline{D_j} ++ \overline{D_k}, ifc( () => { return E}, E_j,E_k ))  
-   where (\overline{\phi}, if e { goto l_j; } else { goto l_k; }) = kenv(l_i)
-         (\overline{D_j}, E_j) = CL_cps l_j kenv cfg
-         (\overline{D_k}, E_k) = CL_cps l_k kenv cfg
-         E = CE_cps e
--- in c 
-CL_cps l_i kenv cfg 
-   | \exists l_j, l_k: l_j \= l_k /\ (l_i,l_j) \in cfg /\ (l_i, l_k) \in cfg 
-     /\ \not (\exists  l' : (l_j, l', l_i) \in cfg \/ (l_k, l', l_i) \in cfg)
-   = (Ifc_i::IfTr_i::IfFl_i::\overline{D_j} ++ \overline{D_k}, Ifc_i) 
-   where (\overline{\phi}, if e { goto l_j; } else { goto l_k; }) = kenv(l_i)
-         (\overline{D_j}, E_j) = CL_cps l_j kenv cfg
-         (\overline{D_k}, E_k) = CL_cps l_k kenv cfg
-         E = CE_cps e
-         IfCond_i = int ifcond_i (ctxt* c) { return E; }
-         IfTr_i = void iftr_i (ctxt* c) { (CF_cps l_i l_j); return E_j; }
-         IfFl_i = void iffl_i (ctxt* c) { (CF_cps l_i l_k); return E_k; }
-         Ifc_i = void ifc_i (ctxt* c) { ifc_push(&ifcond_i, &iftr_i, &iftf_i,c); lambda_ifc(c); }
-
--}
-           case M.lookup l_i kenv of 
-             { Just n -> case lb_stmts n of  
-                  { [ AST.CBlockStmt 
-                      (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
-                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv cfg
-                           (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv cfg
-                           exp'      = cps_trans_exp localVars fargs ctxtName exp
-                           tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
-                           tyInt     = [AST.CTypeSpec (AST.CIntType N.undefNode)]
-                           declrs = []
-                           paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                                       [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-                           paramDeclr = [paramCtxt]      
-                           decltrs    = [AST.CFunDeclr (Right (paramDeclr,False)) [] N.undefNode] 
-                           mb_strLitr = Nothing
-                           attrs      =  []
-                           
-                           ifcCond    = fname `app` iid ifcCondName
-                           ifcCond_i  = ifcCond `app` l_i 
-                           ifcCondStmt = AST.CCompound [] [AST.CBlockStmt (AST.CReturn (Just exp') N.undefNode)] N.undefNode
-                           ifcCond_iD = AST.CFunDef tyInt (AST.CDeclr (Just ifcCond_i) decltrs mb_strLitr attrs N.undefNode) declrs ifcCondStmt N.undefNode
-                           
-                           ifcTrue    = fname `app` iid ifcTrName
-                           ifcTrue_i  = ifcTrue `app` l_i
-                           
-                           ifcTruePhis = case M.lookup l_j kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_j (lb_phis n)
-                             }
-                           ifcTrueStmt = AST.CCompound [] (ifcTruePhis ++ [AST.CBlockStmt (AST.CReturn (Just e_j) N.undefNode)]) N.undefNode 
-                           ifcTrue_iD = AST.CFunDef tyVoid (AST.CDeclr (Just ifcTrue_i) decltrs mb_strLitr attrs N.undefNode) declrs ifcTrueStmt N.undefNode
-                           
-                           
-                           ifcFalse    = fname `app` iid ifcFlName
-                           ifcFalse_i  = ifcFalse `app` l_i
-                           ifcFalsePhis = case M.lookup l_k kenv of 
-                             { Nothing -> [] 
-                             ; Just n  -> cps_trans_phis ctxtName l_i l_k (lb_phis n)
-                             } 
-                           ifcFalseStmt = AST.CCompound [] (ifcFalsePhis ++ [AST.CBlockStmt (AST.CReturn (Just e_k) N.undefNode)]) N.undefNode 
-                           ifcFalse_iD = AST.CFunDef tyVoid (AST.CDeclr (Just ifcFalse_i) decltrs mb_strLitr attrs N.undefNode) declrs ifcFalseStmt N.undefNode
-
-                           
-                           ifc        = fname `app` iid ifcName
-                           ifc_i      = ifc `app` l_i
-                           ifcPush    = fname `app` iid ifcPushName
-                           lambdaifc  = fname `app` iid lambdaIfcName
-                           ifcStmt    = AST.CCompound [] 
-                                        [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` ifcPush)) [ (adr (cvar ifcCond_i)), (adr (cvar ifcTrue_i)), (adr (cvar ifcFalse_i)), (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode)
-                                        , (AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` lambdaifc)) [ (cvar $ iid ctxtParamName) ] N.undefNode)) N.undefNode))
-                                        ] 
-                                        N.undefNode
-                           ifc_iD = AST.CFunDef tyVoid (AST.CDeclr (Just ifc_i) decltrs mb_strLitr attrs N.undefNode) declrs ifcStmt N.undefNode
-                       in ([ifcCond_iD, ifcTrue_iD, ifcFalse_iD, ifc_iD] ++ d_j ++ d_k, cvar ifc_i)
-
-                  ; _ -> error "not possible"
-                  }
-             ; _ -> error "not possible"
-             } 
-    ; [] -> 
-{-
--- in target langauge
-CL_cps l_i kenv cfg 
-   | \not (\exists l_j : (l_i,l_j) \in cfg) 
-   = ([D], bind( f_i, () => { return ret()})  
-   where (\overline{\phi}, s) = kenv(l_i)
-         k is fresh
-         S = CS_cps s kenv l_i k 
-         D = (void => void) => void f_i = (void => void k) = { S }
--- in c 
-CL_cps l_i kenv cfg 
-   | \not (\exists l_j : (l_i,l_j) \in cfg) 
-   = ([D], bind( f_i, () => { return ret()})  
-   where (\overline{\phi}, s) = kenv(l_i)
-         k is fresh
-         S = CS_cps s kenv l_i k 
-         D = void f_i = (ctxt* c) = { S }
-         Bind_i = void bind_i (ctxt* c) { bind_push(&f_i, &ret, c); lambda_bind(c); }
--}           
-           let f_iname = fname `app` l_i
-               tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
-               declrs = []
-               paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                           [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-               paramDeclr = [paramCtxt]      
-               decltrs = [AST.CFunDeclr (Right (paramDeclr,False)) [] N.undefNode] 
-               mb_strLitr = Nothing
-               attrs  =  []
-               
-               k      = iid kParamName
-
-               lb     = fromJust (M.lookup l_i kenv)
-               stmt' =  AST.CCompound [] ((cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k kenv l_i (lb_stmts lb)) ) N.undefNode 
-               f_iD   = AST.CFunDef tyVoid (AST.CDeclr (Just f_iname) decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
-               
-               bind  = fname `app` iid bindName -- todo need to add fname prefix?
-               bindpush = fname `app`  iid bindPushName
-               lambdabind = fname `app` iid lambdaBindName
-               
-               ret = fname `app` iid retName
-               
-               bind_i = bind `app` l_i
-               bindPush = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` bindpush)) [ (adr $ cvar f_iname), (adr $ cvar ret), (cvar $ iid ctxtParamName)] N.undefNode)) N.undefNode) -- bind_push(&f_i, &e, ctxt)
-               lambdaBindApp = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` lambdabind)) [(cvar $ iid ctxtParamName)] N.undefNode)) N.undefNode) -- lambdaBind(ctxt)
-               bindStmt = AST.CCompound [] [ bindPush, lambdaBindApp] N.undefNode
-               bind_iD = AST.CFunDef tyVoid (AST.CDeclr (Just bind_i) decltrs mb_strLitr attrs N.undefNode) declrs bindStmt N.undefNode
-             
-        in (f_iD:bind_iD:[], cvar bind_i) 
-             
-    }
+cps_trans_lb isReturnVoid localVars fargs ctxtName fname lb_map ident visitors exits lb  = 
+  let fname' = fname `app` ident
+      tyVoid = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
+      declrs = []
+      k      = iid kParamName
+      paramK = AST.CDecl tyVoid -- void (*k)(ctxt *)
+               [(Just (AST.CDeclr (Just k) 
+                       [ AST.CPtrDeclr [] N.undefNode
+                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                N.undefNode], False)
+                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      paramCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
+                  [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+      paramDeclr = [paramK, paramCtxt]
+      decltrs = [AST.CFunDeclr (Right ([paramK, paramCtxt],False)) [] N.undefNode] 
+      mb_strLitr = Nothing
+      attrs  =  []
+      pop   | ident `M.member` exits = [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "pop"))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) ] 
+            | otherwise              = []
+      stmt' =  AST.CCompound [] (pop ++ (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident (lb_loop lb) visitors exits (lb_stmts lb))) N.undefNode      
+  in AST.CFunDef tyVoid (AST.CDeclr (Just fname') decltrs mb_strLitr attrs N.undefNode) declrs stmt' N.undefNode
+    
      
      
 cps_trans_stmts :: Bool -> -- ^ is return type void
@@ -594,13 +311,15 @@ cps_trans_stmts :: Bool -> -- ^ is return type void
                    Ident -> -- ^ fname 
                    Ident -> -- ^ K
                    -- ^ \bar{\Delta} become part of the labelled block flag (loop) 
-                   M.Map Ident LabeledBlock ->  -- ^ \bar{b} kenv
+                   M.Map Ident LabeledBlock ->  -- ^ \bar{b}
                    Ident ->  -- ^ label for the current block
+                   Bool  ->  -- ^ whether label \in \Delta (is it a loop block)
+                   Visitors ->
+                   Exits ->
                    [AST.CCompoundBlockItem N.NodeInfo] ->  -- ^ stmts
                    [AST.CCompoundBlockItem N.NodeInfo]
--- cps_trans_stmts = undefined                   
-cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k kenv l_i stmts = -- todo: maybe pattern match the CCompound constructor here?
-  concatMap (\stmt -> cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_i stmt) stmts 
+cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmts = -- todo: maybe pattern match the CCompound constructor here?
+  concatMap (\stmt -> cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmt) stmts 
 
 
 
@@ -612,80 +331,186 @@ cps_trans_stmt :: Bool -> -- ^ is return type void
                   Ident ->  -- ^ fname
                   Ident ->  -- ^ K
                    -- ^ \bar{\Delta} become part of the labelled block flag (loop)                   
-                  M.Map Ident LabeledBlock -> -- ^ \bar{b} kenv
+                  M.Map Ident LabeledBlock -> -- ^ \bar{b}
                   Ident ->  -- ^ label for the current block
+                  Bool -> -- ^ whether label \in \Delta (is it a loop block)
+                  Visitors ->
+                  Exits ->
                   AST.CCompoundBlockItem N.NodeInfo -> 
                   [AST.CCompoundBlockItem N.NodeInfo]
 {-
--- in target language
-CS_cps (goto l_i) kenv l_j k = \overline{X = E}; return k();
-       where (\overline{\phi}, s) = kenv l_i
-             \overline{(X,E)} = CF_cps \overline{\phi} l_j
--- in C
-CS_cps (goto l_i) kenv l_j k = \overline{X = E}; ctxt_arr_void k = kpeek(ctxt); kpop(ctxt); return (*k)(ctxt);
-       where (\overline{\phi}, s) = kenv l_i
-             \overline{(X,E)} = CF_cps \overline{\phi} l_j
-
+l_i : { \bar{i} ; s } \in \bar{b}   l, l_i |- \bar{i} => x1 = e1; ...; xn =en; 
+----------------------------------------------------------------------------- (GT1)
+fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => x1 = e1; ...; xn = en ; fnl_{i}(k)
 -}
 -- note that our target is C, hence besides k, the function call include argument such as context
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_j (AST.CBlockStmt (AST.CGoto l_i nodeInfo)) = case M.lookup l_i kenv of 
-  { Just lb -> 
-       let 
-           asgmts  = cps_trans_phis ctxtName l_j l_i (lb_phis lb)
-           peek_ty = [AST.CTypeSpec (AST.CTypeDef (fname `app` (iid ctxt_arr_void)) N.undefNode)]
-           peek_var = Just (AST.CDeclr (Just (fname `app` k)) [] Nothing [] N.undefNode)
-           peek_rhs = Just (AST.CInitExpr (AST.CCall (cvar (fname `app` (iid kPeekName))) [cvar $ iid ctxtParamName] N.undefNode) N.undefNode) 
-           peek   = AST.CBlockDecl (AST.CDecl peek_ty [(peek_var, peek_rhs, Nothing)] N.undefNode) 
-           pop    = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid kPopName))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode)
-           kApp   = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar (fname `app` k)) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) -- (*k)(ctxt)
-       in asgmts ++ [ peek, pop, kApp ]
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CGoto li nodeInfo)) = case M.lookup li lb_map of 
+  { Just lb | not (null (lb_phis lb)) -> 
+       let asgmts  = cps_trans_phis ctxtName ident li (lb_phis lb)
+           fname'  = fname `app` li
+           args    = [ cvar k
+                     , cvar (iid ctxtParamName)] 
+           funcall = case M.lookup ident visitors of -- in case it is the last block of descending from the loop-if then branch, we call (*k)(ctxt) instead
+             { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar k) [cvar (iid ctxtParamName)] N.undefNode)) N.undefNode) 
+             ; _ -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
+             }
+       in asgmts ++ [ funcall ]
+{-
+l_i : { s } \in \bar{b}    
+----------------------------------------------------------------------------- (GT2)
+fn, K, \bar{\Delta}, \bar{b} |-_l goto l_i => fnl_{i}(k)
+-}                                   
+            | otherwise      -> 
+         let fname'  = fname `app` li
+             args    = [ cvar k
+                       , cvar (iid ctxtParamName) ] 
+             funcall = case M.lookup ident visitors of -- in case it is the last block of descending from the loop-if then branch, we call (*k)(ctxt) instead
+               { Just loop_lbl | li == loop_lbl -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar k) [cvar (iid ctxtParamName)] N.undefNode)) N.undefNode) 
+               ; _ -> AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar fname') args N.undefNode)) N.undefNode)
+               }
+         in [ funcall ]
   ; Nothing -> error "cps_trans_stmt failed at a non existent label."
   }
                                                                                         
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_j (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) =  -- exp
-  let e' = cps_trans_exp localVars fargs ctxtName e
-  in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CExpr (Just e) nodeInfo)) = 
+  case e of 
+    -- todo: deal with array element assignment, we need to assign the array first. we should do it at the block level
+   { AST.CAssign op lval rval ni -> 
+{-                                                                                        
+x => X; e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
+----------------------------------------------------------------------------- (SeqAssign)
+fn, K, \bar{\Delta}, \bar{b} |-_l x = e;s => X = E;S
+-}             
+     let e' = cps_trans_exp localVars fargs ctxtName e
+     in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+   ; _ -> 
+{-                                                                                        
+e => E; fn, K, \bar{\Delta}, \bar{b} |-_l s => S
+----------------------------------------------------------------------------- (SeqE)
+fn, K, \bar{\Delta}, \bar{b} |-_l e;s => E;S
+-}     
+     let e' = cps_trans_exp localVars fargs ctxtName e
+     in [AST.CBlockStmt (AST.CExpr (Just e') nodeInfo)]
+   }
 {-
--- target language
-CS_cps (return e) kenv l_j k = res = E; return k();
-         where E = CE_cps e
-
--- c language
-CS_cps (return e) kenv l_j k = res = E; ctxt_arr_void k = kpeek(ctxt); kpop(ctxt); return (*k)(ctxt);
+----------------------------------------------------------------------------- (returnNil)
+fn, K, \bar{\Delta}, \bar{b} |-_l return; =>  id(); 
 -}
+-- C does not support higher order function.
+-- K is passed in as a formal arg
+-- K is a pointer to function
+-- updated: change from K(); to id(); because of return in a loop, (see noreturn.c)
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
+  let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
+  in [ funcall ]
 
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_i  (AST.CBlockStmt (AST.CReturn Nothing nodeInfo)) = 
-  let
-    peek_ty = [AST.CTypeSpec (AST.CTypeDef (fname `app` (iid ctxt_arr_void)) N.undefNode)]
-    peek_var = Just (AST.CDeclr (Just (fname `app` k)) [] Nothing [] N.undefNode)
-    peek_rhs = Just (AST.CInitExpr (AST.CCall (cvar (fname `app` (iid kPeekName))) [cvar $ iid ctxtParamName] N.undefNode) N.undefNode) 
-    peek   = AST.CBlockDecl (AST.CDecl peek_ty [(peek_var, peek_rhs, Nothing)] N.undefNode) 
-    pop    = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid kPopName))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode)
-    kApp   = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar (fname `app` k)) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) -- (*k)(ctxt)
-  in [ peek, pop, kApp ]
-
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_i  (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) = 
-  let
-    peek_ty = [AST.CTypeSpec (AST.CTypeDef (fname `app` (iid ctxt_arr_void)) N.undefNode)]
-    peek_var = Just (AST.CDeclr (Just (fname `app` k)) [] Nothing [] N.undefNode)
-    peek_rhs = Just (AST.CInitExpr (AST.CCall (cvar (fname `app` (iid kPeekName))) [cvar $ iid ctxtParamName] N.undefNode) N.undefNode) 
-    peek   = AST.CBlockDecl (AST.CDecl peek_ty [(peek_var, peek_rhs, Nothing)] N.undefNode) 
-    pop    = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid kPopName))) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode)
-    kApp   = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (ind $ cvar (fname `app` k)) [cvar $ iid ctxtParamName] N.undefNode)) N.undefNode) -- (*k)(ctxt)
-    e' = cps_trans_exp localVars fargs ctxtName e
-    assign_or_e | isReturnVoid = ((cvar (iid ctxtParamName)) .->. (iid "func_result")) .=. e' 
-                 | otherwise = e' 
-    stmt = AST.CBlockStmt (AST.CExpr (Just assign_or_e) N.undefNode)
-  in [ stmt, peek, pop, kApp ]
+{-
+e => E
+----------------------------------------------------------------------------- (returnE)
+fn, K, \bar{\Delta}, \bar{b} |-_l return e; => x_r = E;  id()
+-}
+-- C does not support higher order function.
+-- x_r and K belong to the contxt
+-- K is a pointer to function
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CReturn (Just e) nodeInfo)) 
+  | isReturnVoid = 
+    let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode) 
+    in [ funcall ]
+  | otherwise = 
+      let funcall = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar (fname `app` (iid "id"))) [(cvar (iid ctxtParamName))] N.undefNode)) N.undefNode)
+          e' = cps_trans_exp localVars fargs ctxtName e
+          assign = ((cvar (iid ctxtParamName)) .->. (iid "func_result")) .=. e' 
+      in [ AST.CBlockStmt (AST.CExpr (Just assign) nodeInfo), funcall ]
   
+     
 
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_i (AST.CBlockStmt (AST.CCompound ids stmts nodeInfo)) = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta  visitors exits (AST.CBlockStmt (AST.CIf exp trueStmt mbFalseStmt nodeInfo)) 
+{-
+l \in \Delta
+e => E
+------------------------------------------------------------------------------------------------------- (IfLoop)
+fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { goto l1 } else { goto l2 } => loop(() => E, f_l1 ,f_l2, k) ; 
+-}  
+-- in C, f_l1 and f_l2 need to be passed in as address &
+-- we need to 1. insert pop(ctxt) in f_l2
+--            2. let f_l3 be the closest descendant of f_l1 that call f_l(k,ctxt), replace the call by (*k)(ctxt)  
+-- for 1, we can create a map to keep track of all the l2
+-- for 2, we can perform a check at any l3 where it contains a "goto l;", look up l we find l1 is the true branch visitor
+--        we need to check whether l1 sdom l3, if so, replace "goto l"  by (*k())
+  | inDelta = 
+    let exp' = cps_trans_exp localVars fargs ctxtName exp
+        (lbl_tr, lb_tr) = case trueStmt of 
+          { AST.CGoto lbl _ -> case M.lookup lbl lb_map of 
+               { Nothing -> error "cps_trans_stmt error: label block is not found in the true statement in a loop."
+               ; Just lb -> (lbl, lb)
+               }
+          ; _ -> error "cps_trans_stmt error: the true statement in a looping if statement does not contain goto"
+          }
+        asgmts_tr = cps_trans_phis ctxtName ident lbl_tr (lb_phis lb_tr)
+        (lbl_fl, lb_fl) = case mbFalseStmt of 
+          { Just (AST.CGoto lbl _) -> case M.lookup lbl lb_map of 
+               { Nothing -> error "cps_trans_stmt error: label block is not found in the false statement in a loop."
+               ; Just lb -> (lbl, lb)
+               }
+          ; _ -> error "cps_trans_stmt error: the false statement in a looping if statement does not contain goto"
+          }
+        asgmts_fl = cps_trans_phis ctxtName ident lbl_fl (lb_phis lb_fl)
+        -- supposed to push asgmts_tr and asgmnts_fl to before f_l1 and f_l2, but does not work here.
+        push_args :: [AST.CExpression N.NodeInfo]
+        push_args = [ AST.CUnary AST.CAdrOp (cvar $ fname `app` (iid "cond") `app` ident) N.undefNode
+                    , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_tr)) N.undefNode
+                    , AST.CUnary AST.CAdrOp (cvar (fname `app` lbl_fl)) N.undefNode
+                    , cvar k
+                    , cvar (iid ctxtParamName)
+                    ]
+        push = fname `app` (iid "push")
+        call_push = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar push) push_args N.undefNode)) N.undefNode)
+        
+        loop =  fname `app` iid "loop__entry"
+        loop_args  = [ (cvar (iid ctxtParamName) .->. (iid "loop_conds")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_visitors")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_exits")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , (cvar (iid ctxtParamName) .->. (iid "loop_ks")) .!!. (cvar (iid ctxtParamName) .->. (iid currStackSizeName))
+                     , cvar (iid ctxtParamName)
+                     ]
+                 
+        call_loop = AST.CBlockStmt (AST.CExpr (Just (AST.CCall (cvar loop) loop_args N.undefNode)) N.undefNode)
+    in [ call_push, call_loop ]
+{-
+l \not \in \Delta
+e => E
+fn, K, \bar{\Delta}, \bar{b} |-_l s1 => S1
+fn, K, \bar{\Delta}, \bar{b} |-_l s2 => S2
+--------------------------------------------------------------------------------------------- (IfNotLoop)
+fn, K, \bar{\Delta}, \bar{b} |-_l if (e) { s1 } else { s2 } => if (E) { S1 } else { S2 } ; 
+-}  
+  | otherwise = 
+    let trueStmt'    = case trueStmt of 
+          { AST.CCompound ids items ni -> AST.CCompound ids (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits items) ni 
+          ; _ -> case cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt trueStmt) of 
+            { [ AST.CBlockStmt trueStmt'' ] -> trueStmt''
+            ; items -> AST.CCompound [] items N.undefNode
+            }
+          }
+        mbFalseStmt' = case mbFalseStmt of 
+          { Nothing        -> Nothing 
+          ; Just (AST.CCompound ids items ni) -> Just $ AST.CCompound ids (cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits items) ni   
+          ; Just falseStmt -> Just $ case cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt falseStmt) of 
+            { [  AST.CBlockStmt falseStmt'' ] -> falseStmt'' 
+            ; items -> AST.CCompound [] items N.undefNode
+            }
+          }
+        exp' = cps_trans_exp localVars fargs ctxtName exp
+    in [AST.CBlockStmt (AST.CIf exp' trueStmt' mbFalseStmt' nodeInfo)]
+
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits (AST.CBlockStmt (AST.CCompound ids stmts nodeInfo)) = 
   -- todo: do we need to do anything with the ids (local labels)?
-  let stmts' = cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k kenv l_i stmts
+  let stmts' = cps_trans_stmts isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmts
   in [AST.CBlockStmt (AST.CCompound ids stmts' nodeInfo)]
   
 
-cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k kenv l_i stmt = 
+cps_trans_stmt isReturnVoid localVars fargs ctxtName fname k lb_map ident inDelta visitors exits stmt = 
   error ("cps_trans_stmt error: unhandled case" ++ (show stmt)) -- (render $ pretty stmt))
      
 
@@ -790,7 +615,7 @@ P1 = void f1 (void => void k) { B1 }
 -- 4. \bar{D} should be the context malloc and initialization
 -- 5. all the formal args should be copied to context
 ssa2cps :: (AST.CFunctionDef N.NodeInfo) -> SSA -> CPS 
-ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) = 
+ssa2cps fundef (SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) = 
   let -- scraping the information from the top level function under obfuscation
       funName        = case getFunName fundef of { Just s -> s ; Nothing -> "unanmed" }
       formalArgDecls :: [AST.CDeclaration N.NodeInfo]
@@ -821,8 +646,7 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
       
       -- all the "nested/helper" function declarations 
       -- todo: packing all the variable into a record 
-      l_0 = iid (labPref ++ "0" )
-      (ps,entryExp)   = cps_trans_lb isReturnVoid local_decl_vars fargs ctxtName (iid funName) l_0 labelledBlocks ssa
+      ps              = cps_trans_lbs isReturnVoid  local_decl_vars fargs ctxtName (iid funName) {- (iid "id") -} visitors exits labelledBlocks 
       
       -- all function signatures
       funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps, fundef]) -- include the source func, in case of recursion

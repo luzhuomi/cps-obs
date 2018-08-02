@@ -351,6 +351,38 @@ data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function w
                , ssa_formal_args :: S.Set Ident                  -- ^ function formal args
                }
            deriving Show
+                    
+                    
+
+-- combinators needed for CPS translation
+-- ^ returns the adjacent nodes given a node
+adjacent :: SSA -> NodeId -> [Ident] 
+adjacent ssa l = case M.lookup l (labelled_blocks ssa) of 
+  { Nothing -> []
+  ; Just n -> lb_succs n
+  }
+                 
+                 
+-- ^ check whether a non-trivial path exists from i to j                 
+pathExists :: SSA -> NodeId -> NodeId -> Bool
+pathExists ssa li lj = 
+  lj `S.member` descendant ssa li
+                 
+
+-- ^ compute all the descendants of a node
+descendant :: SSA -> NodeId -> S.Set NodeId
+descendant ssa l = go ssa S.empty [l]
+  where go :: SSA -> S.Set NodeId -> [NodeId] -> S.Set NodeId
+        go ssa acc [] = acc
+        go ssa acc (l:ls) = 
+          let acc' = S.insert l acc
+              adjs = adjacent ssa l 
+          in if (all (\x -> x `S.member` acc') adjs) 
+             then go ssa acc' ls
+             else let new = filter (\x -> x `S.notMember` acc) adjs
+                  in go ssa acc' (nub (ls ++ new))
+                    
+                    
 {-  The SSA Language
                   ___    _ _
 (Prog)  p::= t x (t x) { d b }
