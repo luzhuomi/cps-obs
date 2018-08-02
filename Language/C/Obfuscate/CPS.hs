@@ -38,8 +38,6 @@ testCPS = do
                 { -- putStrLn $ show $ buildDTree (cfg state)
                 ; -- putStrLn $ show $ buildDF (cfg state)
                 ; let (SSA scopedDecls labelledBlocks sdom _ _) = buildSSA (cfg state) (formalArgs state)
-                      visitors = allVisitors sdom labelledBlocks
-                      exits    = allExits labelledBlocks
                 -- ; putStrLn $ show $ visitors
                 -- ; putStrLn $ show $ exits                  
 
@@ -113,6 +111,7 @@ kPopName = "k_pop"
 
 retName = "ret"
 
+ctxt_arr_bool = "ctxt_arr_bool"
 ctxt_arr_void = "ctxt_arr_void"
 
 ctxtParamName = "ctxtParam"                          
@@ -129,8 +128,21 @@ falseParamName = "falseParam"
 
 kStackTop = "k_stack_top"
 loopStackTop = "loop_stack_top"
-condStackTop = "cond_stack_top"
+ifcStackTop = "ifc_stack_top"
 bindStackTop = "bind_stack_top"
+
+kStackName = "k_stack"
+loopStackCName = "loop_stack_c"
+loopStackVName = "loop_stack_v"
+loopStackEName = "loop_stack_e"
+
+ifcStackCName = "ifc_stack_c"
+ifcStackTrName = "ifc_stack_tr"
+ifcStackFlName = "ifc_stack_fl"
+
+bindStackFName = "bind_stack_f"
+bindStackMName = "bind_stack_m"
+
 
 
 
@@ -802,22 +814,45 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
       ctxtStructName     = funName ++ "Ctxt"
       
       -- the context struct declaration
-      context        = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy ptrArrs local_decl_vars fargs
-      ctxtName       = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
-      
-      -- finding the visitor labels and the exit labels
-      visitors       = allVisitors sdom labelledBlocks
-      exits          = allExits labelledBlocks
-      
-      -- all the conditional function 
-      conds          = allLoopConds local_decl_vars fargs ctxtName funName labelledBlocks 
-      
+      context         = mkContext ctxtStructName labelledBlocks formalArgDecls scopedDecls returnTy ptrArrs local_decl_vars fargs
+      ctxtName        = map toLower ctxtStructName -- alias name is inlower case and will be used in the the rest of the code
+            
       -- loop_cps, loop_lambda, id and pop and push
       loop_cps        = loopCPS ctxtName funName
       lambda_loop_cps = lambdaLoopCPS ctxtName funName
+      loop_push_cps   = loopPushCPS ctxtName funName
+      loop_pop_cps    = loopPopCPS ctxtName funName
+      loop_peek_c_cps = loopPeekCCPS ctxtName funName
+      loop_peek_v_cps = loopPeekVCPS ctxtName funName
+      loop_peek_e_cps = loopPeekECPS ctxtName funName
+      
+      
+      bind_cps = bindCPS ctxtName funName
+      lambda_bind_cps = lambdaBindCPS ctxtName funName
+      bind_push_cps   = bindPushCPS ctxtName funName 
+      bind_pop_cps    = bindPopCPS ctxtName funName
+      bind_peek_m_cps = bindPeekMCPS ctxtName funName
+      bind_peek_f_cps = bindPeekFCPS ctxtName funName
+      
+      ifc_cps = ifcCPS ctxtName funName
+      lambda_ifc_cps  = lambdaIfcCPS ctxtName funName
+      ifc_push_cps    = ifcPushCPS ctxtName funName
+      ifc_pop_cps     = ifcPopCPS ctxtName funName
+      ifc_peek_c_cps  = ifcPeekCCPS ctxtName funName
+      ifc_peek_tr_cps = ifcPeekTrCPS ctxtName funName
+      ifc_peek_fl_cps = ifcPeekFlCPS ctxtName funName 
+      
       id_cps          = idCPS ctxtName funName
-      push_cps        = pushCPS ctxtName funName
-      pop_cps         = popCPS ctxtName funName
+      ret_cps         = retCPS ctxtName funName
+      
+      k_push_cps      = kPushCPS ctxtName funName
+      k_peek_cps      = kPeekCPS ctxtName funName
+      k_pop_cps       = kPopCPS ctxtName funName
+      
+      combinators     = [loop_cps, lambda_loop_cps, loop_push_cps, loop_pop_cps, loop_peek_c_cps, loop_peek_v_cps, loop_peek_e_cps, 
+                         bind_cps, lambda_bind_cps, bind_push_cps, bind_pop_cps, bind_peek_m_cps, bind_peek_f_cps, 
+                         ifc_cps, lambda_ifc_cps, ifc_push_cps,ifc_pop_cps, ifc_peek_c_cps, ifc_peek_tr_cps, ifc_peek_fl_cps, 
+                         id_cps, ret_cps, k_push_cps, k_peek_cps,k_pop_cps]
       
       -- all the "nested/helper" function declarations 
       -- todo: packing all the variable into a record 
@@ -825,7 +860,7 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
       (ps,entryExp)   = cps_trans_lb isReturnVoid local_decl_vars fargs ctxtName (iid funName) l_0 labelledBlocks ssa
       
       -- all function signatures
-      funcSignatures  = map funSig (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps, fundef]) -- include the source func, in case of recursion
+      funcSignatures  = map funSig (ps ++ combinators ++ [fundef]) -- include the source func, in case of recursion
       main_decls = 
         -- 1. malloc the context obj in the main func
         -- ctxtTy * ctxt = (ctxtTy *) malloc(sizeof(ctxtTy));
@@ -852,10 +887,8 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         
         -- 4. initialize the context->curr_stack_size = 0;
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (iid currStackSizeName) .=. (AST.CConst (AST.CIntConst (cInteger 0) N.undefNode))))) N.undefNode) ] ++ 
-        -- 3. calling block 0
-        [ AST.CBlockStmt (AST.CExpr (Just (AST.CCall (AST.CVar ((iid funName) `app` (iid (labPref ++ "0" ))) N.undefNode) 
-                                           [ AST.CUnary AST.CAdrOp (AST.CVar ((iid funName) `app` (iid "id")) N.undefNode) N.undefNode
-                                           , AST.CVar (iid ctxtParamName) N.undefNode ] N.undefNode)) N.undefNode)
+        -- 5. calling entry expression
+        [ AST.CBlockStmt (AST.CExpr (Just entryExp) N.undefNode)
         , if isReturnVoid 
           then AST.CBlockStmt (AST.CReturn Nothing N.undefNode) 
           else AST.CBlockStmt (AST.CReturn (Just $ (cvar (iid ctxtParamName)) .->. (iid "func_result")) N.undefNode)
@@ -865,7 +898,7 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         { AST.CFunDef tySpecfs declarator decls _ nodeInfo -> 
              AST.CFunDef tySpecfs declarator decls (AST.CCompound [] (main_decls ++ main_stmts) N.undefNode) nodeInfo 
         }
-  in CPS main_decls main_stmts funcSignatures (ps ++ conds ++ [loop_cps, lambda_loop_cps, id_cps, push_cps, pop_cps])  context main_func 
+  in CPS main_decls main_stmts funcSignatures (ps ++ combinators)  context main_func 
      
 -- ^ turn a scope declaration into a rhs initalization.     
 -- ^ refer to local_array.c
@@ -884,62 +917,34 @@ containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of
          }
   ; _ -> Nothing
   }
-  
--- ^ get all visitor labels from te labeledblocks map     
-allVisitors :: SDom -> M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
-allVisitors sdom lbs = M.fromList $  -- l is a visitor label if (1) succ of l, say l1 is loop, (2) l2, the then-branch label of l1 is sdom'ing l
-  [ (l, succ) 
-  | (l, lblk) <- M.toList lbs
-  , succ <- lb_succs lblk
-  , case M.lookup succ lbs of { Nothing -> False
-                              ; Just lblk' -> (lb_loop lblk') && (domBy sdom (lb_succs lblk' !! 0) l)
-                              }
-  ]
-     
--- ^ get all exit labels from the labeledblocks map
-allExits :: M.Map NodeId LabeledBlock -> M.Map NodeId NodeId
-allExits lbs = M.fromList $  
-  [ ((lb_succs lblk) !! 1, l) | (l, lblk) <- M.toList lbs
-  , (lb_loop lblk) && (length (lb_succs lblk) > 1) ] 
-               
-
--- ^ retrieve all condional test from the loops and turn them into functions     
-allLoopConds :: S.Set Ident -> S.Set Ident -> ContextName -> String ->  M.Map NodeId LabeledBlock -> [AST.CFunctionDef N.NodeInfo]
-allLoopConds local_vars fargs ctxtName fname lbs = 
-  concatMap (\(id,lb) -> loopCond local_vars fargs ctxtName fname (id,lb)) (M.toList lbs)
-
-loopCond :: S.Set Ident -> S.Set Ident -> ContextName -> String -> (NodeId, LabeledBlock) -> [AST.CFunctionDef N.NodeInfo]
-loopCond  local_vars fargs ctxtName fname (l,blk) 
-  | lb_loop blk =
-    let stmts = lb_stmts blk
-        conds = [ cps_trans_exp local_vars fargs ctxtName e | AST.CBlockStmt (AST.CIf e tt ff _) <- stmts ]
-        formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                   [(Just (AST.CDeclr (Just (iid ctxtParamName)) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-        decls = [ fun [AST.CTypeSpec boolTy] (iid fname `app` iid "cond" `app` l) [formalArgCtxt] [AST.CBlockStmt (AST.CReturn (Just cond) N.undefNode)]
-                | cond <- conds ]
-    in decls
-  | otherwise  = [] 
-                 
 
 -- ^ push
 
 {-
-void push(int (*cond)(struct SortCtxt *),
-	  void (*visitor)(void (*k)(struct SortCtxt*), struct SortCtxt*),
-	  void (*exit)(void (*k)(struct SortCtxt*), struct SortCtxt*),
-	  void (*k)(struct SortCtxt*),
-	  sortctxt *ctxt) {
-  ctxt->curr_stack_size = ctxt->curr_stack_size + 1;  
-  ctxt->loop_conds[ctxt->curr_stack_size] = cond;
-  ctxt->loop_visitors[ctxt->curr_stack_size] = visitor;
-  ctxt->loop_exits[ctxt->curr_stack_size] = exit;
-  ctxt->loop_ks[ctxt->curr_stack_size] = k;
+void loop_push(ctxt_arr_bool cond,
+	  ctxt_arr_void visitor,
+	  ctxt_arr_void exit,
+	  ctxt *ctxt) {
+  ctxt->loop_c[ctxt->curr_stack_size] = cond;
+  ctxt->loop_v[ctxt->curr_stack_size] = visitor;
+  ctxt->loop_e[ctxt->curr_stack_size] = exit;
+  ctxt->loop_stack_top = ctxt->curr_stack_size + 1;  
 }
 -}
                  
-pushCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
-pushCPS ctxtName fname = 
-  let cond          = iid condParamName
+genPushCPS :: ContextName -> 
+              String -> -- function name prefix
+              String -> -- operator name (loop or ifc)
+              String -> -- stackTop name
+              String -> -- fst para name (cond)
+              String -> -- snd para name (visitor or tr)
+              String -> -- third para name (exit or fl)
+              String -> -- stack fst name
+              String -> -- stack snd name
+              String -> -- stack third name
+              AST.CFunctionDef N.NodeInfo 
+genPushCPS ctxtName fname operatorName stackTop condParaName sndParamName thirdParamName stackCName stackSndName stackThirdName = 
+  let cond          = iid condParaName
       formalArgCond = AST.CDecl [AST.CTypeSpec intTy] -- int (*cond)(ctxt *)
                       [(Just (AST.CDeclr (Just cond) 
                               [ AST.CPtrDeclr [] N.undefNode
@@ -947,52 +952,72 @@ pushCPS ctxtName fname =
                                                        [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
                                                        N.undefNode], False)
                                               ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
-      visitor       = iid visitorParamName
-      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*X)(void (*k)(ctxt*), ctxt*)
-                         [(Just (AST.CDeclr (Just x)
-                                 [ AST.CPtrDeclr [] N.undefNode
-                                 , AST.CFunDeclr (Right ([ AST.CDecl [AST.CTypeSpec voidTy] [(Just (AST.CDeclr (Just k) [AST.CPtrDeclr [] N.undefNode
-                                                                                                                        ,AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode], False)) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-                                                         , AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-                                                         ],False)) [] N.undefNode
-                                 ] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-      formalArgVisitor = formalArgX visitor
-      exit          = iid exitParamName
-      formalArgExit = formalArgX exit
-      k             = iid kParamName      
-      formalArgK = AST.CDecl [AST.CTypeSpec voidTy] -- void (*k)(ctxt *)
-               [(Just (AST.CDeclr (Just k) 
-                       [ AST.CPtrDeclr [] N.undefNode
-                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
-                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
-                                                N.undefNode], False)
-                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*x)(ctxt *)
+                     [(Just (AST.CDeclr (Just x) 
+                             [ AST.CPtrDeclr [] N.undefNode
+                             , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                       [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                       N.undefNode], False)
+                                              ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      second       = iid sndParamName                     
+      formalArgSecond = formalArgX second
+      third          = iid thirdParamName
+      formalArgThird = formalArgX third
       ctxt          = iid ctxtParamName                 
       formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "push") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
-     [ AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid currStackSizeName)) .=. (AST.CBinary AST.CAddOp (cvar ctxt .->. (iid currStackSizeName)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
-     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_conds")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar cond))) N.undefNode)
-     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_visitors")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar visitor))) N.undefNode)
-     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_exits")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar exit))) N.undefNode)
-     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid "loop_ks")) .!!. (cvar ctxt .->. (iid currStackSizeName))) .=. (cvar k))) N.undefNode)
+                      [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid operatorName) [formalArgCond, formalArgSecond, formalArgThird, formalArgCtxt] 
+     [ AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid stackCName)) .!!. (cvar ctxt .->. (iid stackTop))) .=. (cvar cond))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid stackSndName)) .!!. (cvar ctxt .->. (iid stackTop))) .=. (cvar second))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just (((cvar ctxt .->. (iid stackThirdName)) .!!. (cvar ctxt .->. (iid stackTop))) .=. (cvar third))) N.undefNode)
+     , AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid stackTop)) .=. (AST.CBinary AST.CAddOp (cvar ctxt .->. (iid stackTop)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
      ]
                  
+loopPushCPS :: ContextName -> 
+              String -> -- function name prefix
+              AST.CFunctionDef N.NodeInfo
+loopPushCPS ctxtName fname = genPushCPS ctxtName fname loopPushName loopStackTop condParamName visitorParamName exitParamName loopStackCName loopStackVName loopStackEName
+
+
+ifcPushCPS :: ContextName -> 
+              String -> -- function name prefix
+              AST.CFunctionDef N.NodeInfo
+ifcPushCPS ctxtName fname = genPushCPS ctxtName fname ifcPushName ifcStackTop condParamName trueParamName falseParamName ifcStackCName ifcStackTrName ifcStackFlName
+
 
 {-     
 void pop(sortctxt *ctxt) {
   ctxt->curr_stack_size = ctxt->curr_stack_size - 1;
 }
 -}
-     
-popCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
-popCPS ctxtName fname = 
+
+genPopCPS :: ContextName -> 
+             String -> -- ^ function name prefix
+             String -> -- ^ operator name
+             String -> -- ^ stackTop
+             AST.CFunctionDef N.NodeInfo 
+genPopCPS ctxtName fname operatorName stackTop = 
   let ctxt          = iid ctxtParamName                 
       formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
-                 [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "pop") [formalArgCtxt]
-     [ AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid currStackSizeName)) .=. (AST.CBinary AST.CSubOp (cvar ctxt .->. (iid currStackSizeName)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
+                      [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid operatorName) [formalArgCtxt]
+     [ AST.CBlockStmt (AST.CExpr (Just ((cvar ctxt .->. (iid stackTop)) .=. (AST.CBinary AST.CSubOp (cvar ctxt .->. (iid stackTop)) (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) N.undefNode))) N.undefNode)
      ]
+
+     
+kPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+kPopCPS ctxtName fname = genPopCPS ctxtName fname kPopName kStackTop
+
+loopPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+loopPopCPS ctxtName fname = genPopCPS ctxtName fname loopPopName loopStackTop
+
+ifcPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+ifcPopCPS ctxtName fname = genPopCPS ctxtName fname ifcPopName ifcStackTop
+
+
+bindPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+bindPopCPS ctxtName fname = genPopCPS ctxtName fname bindPopName bindStackTop
+
 
 -- ^ loop_cps 
 {-
@@ -1074,6 +1099,8 @@ lambdaLoopCPS ctxtName fname =
                                           ] N.undefNode)) N.undefNode) ]
                  
 
+
+
 {-
 void id(sortctxt *ctxt) { return; }
 
@@ -1087,6 +1114,76 @@ idCPS ctxtName fname =
   in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "id") [formalArgCtxt]
      [ AST.CBlockStmt (AST.CReturn Nothing N.undefNode) ]
      
+
+retCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+retCPS = undefined
+
+
+loopPeekCCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+loopPeekCCPS = undefined
+
+
+loopPeekVCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+loopPeekVCPS = undefined
+
+
+loopPeekECPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+loopPeekECPS = undefined
+
+
+-- loopPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo 
+-- loopPopCPS = undefined
+
+
+
+lambdaBindCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+lambdaBindCPS = undefined
+
+
+bindPushCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+bindPushCPS = undefined
+
+-- bindPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+-- bindPopCPS = undefined
+
+
+bindCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+bindCPS = undefined
+
+
+bindPeekMCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+bindPeekMCPS = undefined
+
+bindPeekFCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+bindPeekFCPS = undefined
+
+
+ifcCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+ifcCPS = undefined
+
+lambdaIfcCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+lambdaIfcCPS = undefined
+
+
+ifcPeekCCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+ifcPeekCCPS = undefined
+
+ifcPeekTrCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+ifcPeekTrCPS = undefined
+
+
+ifcPeekFlCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+ifcPeekFlCPS = undefined
+
+-- ifcPopCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+-- ifcPopCPS = undefined
+
+kPushCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+kPushCPS = undefined
+
+
+kPeekCPS :: ContextName -> String -> AST.CFunctionDef N.NodeInfo
+kPeekCPS = undefined
 
 
 -- ^ generate function signature declaration from function definition
