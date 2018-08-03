@@ -125,3 +125,16 @@ funCall f args = AST.CCall f args N.undefNode
 isVoidDeclSpec :: [AST.CDeclarationSpecifier N.NodeInfo] -> Bool
 isVoidDeclSpec [ AST.CTypeSpec (AST.CVoidType _) ] = True
 isVoidDeclSpec _ = False
+
+
+ptrTyArg :: [AST.CDeclarationSpecifier N.NodeInfo] -> -- ^ type decl
+            Ident -> -- ^ arg name
+            AST.CDeclaration N.NodeInfo
+ptrTyArg ty arg = AST.CDecl ty [(Just (AST.CDeclr (Just arg) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode              
+
+
+(.::*.) :: Ident -> -- ^ arg name
+           [AST.CDeclarationSpecifier N.NodeInfo] -> -- ^ type decl
+           AST.CDeclaration N.NodeInfo
+(.::*.) arg ty = ptrTyArg ty arg
+
