@@ -1022,14 +1022,16 @@ bindPopCPS ctxtName fname = genPopCPS ctxtName fname bindPopName bindStackTop
 -- ^ loop_cps 
 {-
 void loop_cps(int (*cond)(sortctxt*),
-	      void (*visitor)(void (*k)(sortctxt*), sortctxt*),
-	      void (*exit)(void (*k)(sortctxt*), sortctxt*),
-	      void (*k)(sortctxt *), sortctxt* ctxt) {
+	      void (*visitor)(sortctxt*),
+	      void (*exit)(sortctxt*),
+	      sortctxt* ctxt) {
   
   if ((*cond)(ctxt)) {
-    (*visitor)(&lambda_loop_cps, ctxt);
+    k_push(&lambda_loop_cps, ctxt);
+    (*visitor)(ctxt);
   } else {
-    (*exit)(k,ctxt);
+    loop_pop(c);
+    (*exit)(ctxt);
   }
 }
 
@@ -1044,30 +1046,22 @@ loopCPS ctxtName fname =
                                                        [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
                                                        N.undefNode], False)
                                               ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*x)(ctxt *)
+                     [(Just (AST.CDeclr (Just x) 
+                             [ AST.CPtrDeclr [] N.undefNode
+                             , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
+                                                       [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
+                                                       N.undefNode], False)
+                                              ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
       visitor       = iid visitorParamName
-      formalArgX x = AST.CDecl [AST.CTypeSpec voidTy] -- void (*X)(void (*k)(ctxt*), ctxt*)
-                         [(Just (AST.CDeclr (Just x)
-                                 [ AST.CPtrDeclr [] N.undefNode
-                                 , AST.CFunDeclr (Right ([ AST.CDecl [AST.CTypeSpec voidTy] [(Just (AST.CDeclr (Just k) [AST.CPtrDeclr [] N.undefNode
-                                                                                                                        ,AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode], False)) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-                                                         , AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)] [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
-                                                         ],False)) [] N.undefNode
-                                 ] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode
       formalArgVisitor = formalArgX visitor
       exit          = iid exitParamName
       formalArgExit = formalArgX exit
-      k             = iid kParamName      
-      formalArgK = AST.CDecl [AST.CTypeSpec voidTy] -- void (*k)(ctxt *)
-               [(Just (AST.CDeclr (Just k) 
-                       [ AST.CPtrDeclr [] N.undefNode
-                       , AST.CFunDeclr (Right ([AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode) ] 
-                                                [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] 
-                                                N.undefNode], False)
-                                       ) [] N.undefNode] Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode 
+      -- k             = iid kParamName      
       ctxt          = iid ctxtParamName                 
       formalArgCtxt = AST.CDecl [AST.CTypeSpec (AST.CTypeDef (iid ctxtName) N.undefNode)]  -- ctxt* ctxt
                  [(Just (AST.CDeclr (Just ctxt) [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
-  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop__entry") [formalArgCond, formalArgVisitor, formalArgExit, formalArgK, formalArgCtxt] 
+  in fun [AST.CTypeSpec voidTy] (iid fname `app` iid "loop__entry") [formalArgCond, formalArgVisitor, formalArgExit, formalArgCtxt] 
      [
        AST.CBlockStmt (AST.CIf (funCall (ind (cvar cond)) [(cvar ctxt)]) 
                        (AST.CCompound [] [AST.CBlockStmt ( AST.CExpr (Just $ funCall (ind (cvar visitor)) [ adr (cvar (iid fname `app` iid "lambda_loop"))
