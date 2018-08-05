@@ -356,7 +356,7 @@ data SSA = SSA { scoped_decls  :: [AST.CDeclaration N.NodeInfo]  -- ^ function w
 
 -- combinators needed for CPS translation
 -- ^ returns the adjacent nodes given a node
-adjacent :: SSA -> NodeId -> [Ident] 
+adjacent :: SSA -> NodeId -> [NodeId] 
 adjacent ssa l = case M.lookup l (labelled_blocks ssa) of 
   { Nothing -> []
   ; Just n -> lb_succs n
@@ -381,8 +381,47 @@ descendant ssa l = go ssa S.empty [l]
              then go ssa acc' ls
              else let new = filter (\x -> x `S.notMember` acc) adjs
                   in go ssa acc' (nub (ls ++ new))
-                    
-                    
+
+-- ^ pre condition, a path exists
+-- ^ compute the shortest path between nodes excluding the starting and ending nodes
+-- ^ result is in reversed order        
+-- ^ a typical shortest path via bfs         
+path :: SSA -> NodeId -> NodeId -> Maybe [NodeId]
+path ssa li lj = go ssa S.empty [[li]]
+  where go :: SSA -> S.Set NodeId -> [[NodeId]] -> Maybe [NodeId]
+        go ssa visited [] = Nothing
+        go ssa visited ps = 
+          let visited' = foldl (\v x -> S.insert x v) visited (map head (filter null ps))
+              new_paths = concatMap (\p -> case p of 
+                                        [] -> []
+                                        (x:xs) -> 
+                                          let nexts = filter (\y -> not (y `S.member` visited')) (adjacent ssa x)
+                                          in [ (n:x:xs) | n <- nexts ] ) ps
+              reached = filter (\p -> case p of 
+                                   { (x:xs) | x == lj -> True
+                                   ; _ -> False }) new_paths
+          in if not (null reached) 
+             then Just $ head reached
+             else go ssa visited' new_paths
+-- ^ return the last node before the destination if exists                  
+lastNodeInPath :: SSA -> NodeId -> NodeId -> Maybe NodeId
+lastNodeInPath ssa li lj = case path ssa li lj of             
+  { Nothing -> Nothing
+  ; Just (x:y:xs) -> Just y
+  ; _ -> Nothing
+  }
+
+-- ^ remove an edge from SSA                    
+remove :: SSA -> NodeId -> NodeId -> SSA
+remove ssa li lj = 
+  let lbs = labelled_blocks ssa
+  in case M.lookup li lbs of 
+    { Just n -> let succs = filter (\l -> not (l == lj)) (lb_succs n)
+                    n' = n{lb_succs=succs}
+                    lbs' = M.update (\_ -> Just n') li lbs
+                in ssa{labelled_blocks=lbs'}  
+    ; _ -> ssa }
+
 {-  The SSA Language
                   ___    _ _
 (Prog)  p::= t x (t x) { d b }
