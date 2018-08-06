@@ -12,7 +12,6 @@ import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
-import Language.C.Syntax.Constants
 
 import Control.Applicative
 import Control.Monad.State as M hiding (State)
@@ -338,7 +337,13 @@ CFG, max, preds, continuable |- { stmt1, ..., stmtN } => CFG', max', preds', con
         { mapM_ buildCFG blockItems
         ; return ()
         }
-
+{-
+to handle cases of  multi-line macro rhs declarations like
+if (1) {
+  stmts
+}
+-}
+  buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') | getCInteger one == 1 = buildCFG compound
   buildCFG (AST.CIf exp trueStmt mbFalseStmt nodeInfo) = 
     case mbFalseStmt of 
 {-  
@@ -488,6 +493,16 @@ CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2,
           cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
     ; put st1{cfg = cfg3', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
     }
+
+{-
+to handle cases of  multi-line macro rhs declarations like
+do {
+  stmts
+} while (0);
+-}
+  buildCFG (AST.CWhile (AST.CConst (AST.CIntConst zero nodeInf))  stmt True nodeInfo) | getCInteger zero == 0 = buildCFG stmt
+
+
 {-  
 CFG, max, preds, continuable |- stmt => CFG1, max1, preds1, false 
 CFG1, max1, preds1, false, contNodes, breakNodes |- while (exp) { stmt } => CFG2, max2, preds2, continuable, contNodes', breakNodes'
