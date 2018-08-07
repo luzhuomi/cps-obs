@@ -560,7 +560,7 @@ CL_cps l_i kenv cfg
                bindStmts =  [ bindPush, lambdaBindApp] 
                bind_iD = fun tyVoid bind_i [paramCtxt] bindStmts 
         in (f_iD:bind_iD:[], cvar bind_i) 
-             
+    ; unhandled_cases -> error ("unhandle case " ++ (show unhandled_cases) ++ " " ++ (show (M.lookup l_i kenv)))
     }
      
      

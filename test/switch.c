@@ -3,6 +3,9 @@ int f(int x) {
   case 1:
     x = x + 1;
     break;
+  case 2:
+    x = x + 2;
+    return x;
   default:
     x = x * 2;
     break;
