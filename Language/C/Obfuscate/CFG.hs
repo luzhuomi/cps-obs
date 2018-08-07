@@ -397,6 +397,27 @@ CFG, max, preds, continuable |- if exp { trueStmt }   => CFG', max', preds', con
       ; Nothing -> buildCFG (AST.CIf exp trueStmt (Just $ AST.CCompound [] [] nodeInfo) nodeInfo) 
       }
   buildCFG (AST.CSwitch exp swStmt nodeInfo) = do 
+
+
+
+{-    
+max1 = max + 1
+CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else { goto l1'; } }}, succs = { l1,l1'}, preds = preds } 
+                                               \union { l1' : { stmts = { if (exp == e2) { goto l2; } else { goto l2'; } }}, succs = { l2,l2'}, preds = {max} }
+                                               \union { l2' : { stmts = { if (exp == e3) { goto l3; } else { goto l3'; } }}, succs = { l3,l3'}, preds = {l1'} }
+                                               ... 
+                                               \union { ln-1' : { stmts = { if (exp == en-1) { goto ln-1; } else { goto l_default; }}, succs = { ln-1, ldefault }, preds = {ln-2'} }
+
+CFG1, max1, {max}, false, {}, contNodes, {} |- stmt1,..., stmtn => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,l1',e1),...,(l_default, _)} 
+CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 != {} } 
+             \update { { l : { preds = preds \union {max} } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 == {} } 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2', max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
+-}
+
+
+
+
 {-    
 max1 = max + 1
 CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else if (exp == e2) { goto l2; } ... else { goto ldefault; } } },

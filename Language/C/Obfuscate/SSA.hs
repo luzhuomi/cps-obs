@@ -412,8 +412,8 @@ lastNodeInPath ssa li lj = case path ssa li lj of
   }
 
 -- ^ remove an edge from SSA                    
-remove :: SSA -> NodeId -> NodeId -> SSA
-remove ssa li lj = 
+removeEdge :: SSA -> (NodeId, NodeId) -> SSA
+removeEdge ssa (li,lj) = 
   let lbs = labelled_blocks ssa
   in case M.lookup li lbs of 
     { Just n -> let succs = filter (\l -> not (l == lj)) (lb_succs n)
@@ -421,6 +421,12 @@ remove ssa li lj =
                     lbs' = M.update (\_ -> Just n') li lbs
                 in ssa{labelled_blocks=lbs'}  
     ; _ -> ssa }
+
+
+                    
+removeEdges :: SSA -> [(NodeId,NodeId)] -> SSA
+removeEdges ssa edges = foldl removeEdge ssa edges
+
 
 {-  The SSA Language
                   ___    _ _

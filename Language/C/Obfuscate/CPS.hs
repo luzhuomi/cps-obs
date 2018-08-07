@@ -340,7 +340,7 @@ CL_cps l_i kenv cfg
              { Just n -> case lb_stmts n of  
                   { [ AST.CBlockStmt 
                       (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
-                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv (remove cfg (fromJust $ lastNodeInPath cfg l_j l_i) l_i)
+                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv (removeEdge cfg ((fromJust $ lastNodeInPath cfg l_j l_i), l_i))
                            (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv cfg
                            exp'      = cps_trans_exp localVars fargs ctxtName exp
                            tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
@@ -394,7 +394,7 @@ CL_cps l_i kenv cfg
                   { [ AST.CBlockStmt 
                       (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
                        let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv cfg
-                           (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv (remove cfg (fromJust $ lastNodeInPath cfg l_k l_i) l_i)
+                           (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv (removeEdge cfg ((fromJust $ lastNodeInPath cfg l_k l_i), l_i))
                            exp'      = cps_trans_exp localVars fargs ctxtName exp
                            tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]
                            tyInt     = [AST.CTypeSpec (AST.CIntType N.undefNode)]
