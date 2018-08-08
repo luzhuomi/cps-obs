@@ -29,7 +29,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts  "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/switch.c" --  "test/sort.c" -- -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -85,14 +85,14 @@ type NodeId = Ident
 
 
 -- we use state monad for the ease of reporting error and keep track of the environment passing
-data StateInfo = StateInfo { currId :: Int
+data StateInfo = StateInfo { currId :: Int -- ^ next available int for generating the next nodeid
                            , cfg :: CFG
                            , currPreds ::[NodeId]
                            , continuable :: Bool
                            -- , stmtUpdate :: M.Map NodeId (Ident -> Node -> Node) -- ^ callback to update the stmt in predecessor, used in case of while, if and goto
                            , contNodes :: [NodeId]
                            , breakNodes :: [NodeId]
-                           , caseNodes :: [(NodeId, CaseExp)] -- case node
+                           , caseNodes :: [CaseExp] -- case node
                            , formalArgs :: [Ident] -- formal arguments
                            } deriving Show
                  
@@ -101,7 +101,18 @@ data StateInfo = StateInfo { currId :: Int
 
 
 data CaseExp = DefaultCase 
-             | ExpCase (AST.CExpression N.NodeInfo) deriving Show
+               NodeId -- ^ the wrapper if statement node id in the translated AST
+               NodeId -- ^ rhs node id
+               
+             | ExpCase (AST.CExpression N.NodeInfo) 
+               NodeId -- ^ the wrapper if statement node id in the translated AST
+               NodeId -- ^ rhs node id               
+             deriving Show
+
+wrapperId :: CaseExp -> NodeId 
+wrapperId (DefaultCase l _ ) = l
+wrapperId (ExpCase e l _ ) = l
+
 
 labPref :: String
 labPref = "myLabel"
@@ -198,6 +209,7 @@ CFG, max, preds, _ |- l: stmt => CFG2, max2, preds, continuable
 
 
 -}
+  
   buildCFG (AST.CLabel label stmt attrs nodeInfo) = do 
     { st <- get 
     ; let max        = currId st
@@ -215,14 +227,18 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- stmt => CFG2, 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------ 
 CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => CFG2, max2, preds2 continuable2, breakNodes, contNodes2, caseNodes2 \union (max, e) 
 -}
+  
   buildCFG (AST.CCase exp stmt nodeInfo) = do 
     { st <- get
     ; let max        = currId st
-          currNodeId = internalIdent (labPref++show max)
+          wrapNodeId = internalIdent (labPref++show max) -- reserved for the wraper if statement in the translation
+          rhsNodeId = internalIdent (labPref++show (max+1))          
+    ; put st{currId = max + 1}
     ; buildCFG stmt 
     ; st1 <- get
-    ; put st1{caseNodes=(caseNodes st1)++[(currNodeId, ExpCase exp)]}
+    ; put st1{caseNodes=(caseNodes st1)++[(ExpCase exp wrapNodeId rhsNodeId)]}
     }
+
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
 {-
@@ -233,11 +249,14 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- default: stmt =>
   buildCFG (AST.CDefault stmt nodeInfo) = do
     { st <- get
     ; let max        = currId st
-          currNodeId = internalIdent (labPref++show max)
+          wrapNodeId = internalIdent (labPref++show max) -- reserved for the wraper if statement in the translation
+          rhsNodeId = internalIdent (labPref++show (max+1))          
+    ; put st{currId = max + 1}          
     ; buildCFG stmt 
     ; st1 <- get
-    ; put st1{caseNodes=(caseNodes st1)++[(currNodeId, DefaultCase)]}
+    ; put st1{caseNodes=(caseNodes st1)++[(DefaultCase wrapNodeId rhsNodeId)]}
     }
+                                          
 {-
 CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lVars = lVars ++ [x] } }  
 x \not in {v | v \in lVars pred, pred \in preds }
@@ -305,45 +324,49 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
-    
-  buildCFG (AST.CExpr Nothing nodeInfo) = do 
-    -- fail $ (posFromNodeInfo nodeInfo) ++ " empty expression stmt not supported." 
-    return () -- todo: check
   
-{-  
-CFG, max, preds, continuable |- stmt1 => CFG1, max1, preds1, continuable1
-...
-CFGn-1, maxn-1, predsn-1, continuablen-1 |- stmtn => CFGn, maxn, predsn, continuablen
+  buildCFG (AST.CExpr Nothing nodeInfo) = return () -- todo: check
+    {-    
+max1 = max + 1
+l0' = max
+CFG1 = CFG \update { pred : { succ = {max} } } \union { l0' : { stmts = { if (exp == e1) { goto l1; } else { goto l1'; } }}, succs = { l1,l1'}, preds = preds }  \update { l1: { preds += l0' } }
+                                               \union { l1' : { stmts = { if (exp == e2) { goto l2; } else { goto l2'; } }}, succs = { l2,l2'}, preds = {l0'} }  \update { l2: { preds += l1' } }
+                                               \union { l2' : { stmts = { if (exp == e3) { goto l3; } else { goto l3'; } }}, succs = { l3,l3'}, preds = {l1'} }  \update { l3: { preds += l2' } }
+                                               ... 
+                                               \union { ln-1' : { stmts = { if (exp == en) { goto ln; } else { goto l_default; }}, succs = { ln, l_default }, preds = {ln-2'} } \update { ln- : { preds += ln-1' }} \update { l_default : { preds += ln-1' } } 
 
----------------------------------------------------------------------------
-CFG, max, preds, continuable |- { stmt1, ..., stmtN } => CFG', max', preds', continuable' 
+CFG1, max1, {}, false, {}, contNodes, {} |- stmt1,..., stmtn+1 => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,l1',e1),...,(l_default, _)} 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2, max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
 -}
-  buildCFG (AST.CCompound localLabels blockItems nodeInfo)
-    | null blockItems = do -- for empty { } we need to create an empty node
-        { st <- get
-        ; let max        = currId st
-              currNodeId = internalIdent (labPref++show max)          
-              lhs        = []
-              rhs        = []
-              max1       = max + 1
-              cfg0       = cfg st 
-              preds0     = currPreds st
-              cfgNode    = Node [] lhs rhs [] preds0 [] Neither
-              cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
-              cfg1       = M.insert currNodeId cfgNode cfg1'
-        ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
-        }
-    | otherwise = do 
-        { mapM_ buildCFG blockItems
-        ; return ()
-        }
+  buildCFG (AST.CCompound localLabels blockItems nodeInfo) =
+    if (null blockItems)  
+    then do 
+      { st <- get
+      ; let max        = currId st
+            currNodeId = internalIdent (labPref++show max)          
+            lhs        = []
+            rhs        = []
+            max1       = max + 1
+            cfg0       = cfg st 
+            preds0     = currPreds st
+            cfgNode    = Node [] lhs rhs [] preds0 [] Neither
+            cfg1'      = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg0 preds0
+            cfg1       = M.insert currNodeId cfgNode cfg1'
+      ; put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = False}
+      }
+    else do 
+      { mapM_ buildCFG blockItems
+      ; return ()
+      }
 {-
 to handle cases of  multi-line macro rhs declarations like
 if (1) {
   stmts
 }
 -}
-  buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') | getCInteger one == 1 = buildCFG compound
+  
+  -- buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') = getCInteger one == 1 = buildCFG compound
   buildCFG (AST.CIf exp trueStmt mbFalseStmt nodeInfo) = 
     case mbFalseStmt of 
 {-  
@@ -396,29 +419,94 @@ CFG, max, preds, continuable |- if exp { trueStmt }   => CFG', max', preds', con
 -}                                
       ; Nothing -> buildCFG (AST.CIf exp trueStmt (Just $ AST.CCompound [] [] nodeInfo) nodeInfo) 
       }
-  buildCFG (AST.CSwitch exp swStmt nodeInfo) = do 
-
-
-
 {-    
-max1 = max + 1
-CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else { goto l1'; } }}, succs = { l1,l1'}, preds = preds } 
-                                               \union { l1' : { stmts = { if (exp == e2) { goto l2; } else { goto l2'; } }}, succs = { l2,l2'}, preds = {max} }
-                                               \union { l2' : { stmts = { if (exp == e3) { goto l3; } else { goto l3'; } }}, succs = { l3,l3'}, preds = {l1'} }
+CFG, max, {}, false, {}, contNodes, {} |- stmt1,..., stmtn+1 => CFG1, max1, preds1, continable1, breakNodes1, contNodes1, {(l1,l1',e1),...,(l_default, _)} 
+l0' = max1
+CFG2 = CFG1 \update { pred : { succ = {max} } } \union { l0' : { stmts = { if (exp == e1) { goto l1; } else { goto l1'; } }}, succs = { l1,l1'}, preds = preds }  \update { l1: { preds += l0' } }
+                                               \union { l1' : { stmts = { if (exp == e2) { goto l2; } else { goto l2'; } }}, succs = { l2,l2'}, preds = {l0'} }  \update { l2: { preds += l1' } }
+                                               \union { l2' : { stmts = { if (exp == e3) { goto l3; } else { goto l3'; } }}, succs = { l3,l3'}, preds = {l1'} }  \update { l3: { preds += l2' } }
                                                ... 
-                                               \union { ln-1' : { stmts = { if (exp == en-1) { goto ln-1; } else { goto l_default; }}, succs = { ln-1, ldefault }, preds = {ln-2'} }
-
-CFG1, max1, {max}, false, {}, contNodes, {} |- stmt1,..., stmtn => CFG2, max2, preds2, continable2, breakNodes, contNodes2, {(l1,l1',e1),...,(l_default, _)} 
-CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 != {} } 
-             \update { { l : { preds = preds \union {max} } | l \in {l1,...,l_default} and preds(l) \intersect breakNodes2 == {} } 
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2', max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
+                                               \union { ln-1' : { stmts = { if (exp == en) { goto ln; } else { goto l_default; }}, succs = { ln, l_default }, preds = {ln-2'} } \update { ln- : { preds += ln-1' }} \update { l_default : { preds += ln-1' } } 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2, ln-1', preds1 \union breakNodes1 , false, breakNodes, contNodes1, caseNodes
 -}
 
+  buildCFG (AST.CSwitch exp swStmt nodeInfo) = do 
+    { st <- get 
+    ; let max = currId st
+          currNodeId = internalIdent (labPref++show max)          
+          (lhs,rhs)  = getVarsFromExp exp          
+          max1       = max + 1
+          l0         = max
+          cfg0       = cfg st 
+          preds0     = currPreds st
+          contNodes0 = contNodes st
+          breakNodes0 = breakNodes st
+          caseNodes0 = caseNodes st
+    ; put st{currPreds=[], continuable = False, breakNodes = [], caseNodes = [] }
+    ; buildCFG swStmt
+    ; st1 <- get 
+    ; let
+          preds1 = breakNodes st1
+          breakNodes1 = breakNodes st1
+          caseNodes1 = caseNodes st1
+          
+          -- this function has to be in the monad, because we only have the label of each case statement, but not the node.
+          caseExpsToIfNodes ::  [CaseExp] ->  
+                                State StateInfo [NodeId] -- the returned list node ids capture last leaving (if wrapper) node, in case there is no default case 
+          caseExpsToIfNodes [] = return [] -- todo fix me: without default case
+          caseExpsToIfNodes ((DefaultCase wrapNodeId rhsNodeId):_) = do 
+            { st <- get
+            ; let preds0 = currPreds st
+                  cfg0 = cfg st 
+                  -- currNodeId = internalIdent (labPref++show max)   
+                  stmts = [AST.CBlockStmt (AST.CGoto rhsNodeId N.undefNode)]
+                  cfgNode = Node stmts [] [] [] preds0 [rhsNodeId] Neither 
+                  cfg0' = M.update (\n -> Just n{preds = nub ((preds n) ++ [wrapNodeId])}) rhsNodeId cfg0 
+                  cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0
+                  cfg1 = M.insert wrapNodeId cfgNode cfg0''
+            ; put st{cfg = cfg1, currPreds=[wrapNodeId], continuable = False}
+            ; return [] -- no extra predessor id to pass
+            }
+          caseExpsToIfNodes ((ExpCase e wrapNodeId rhsNodeId):next:ps)= do 
+            { st <- get
+            ; let preds0 = currPreds st
+                  cfg0 = cfg st 
+                  nextNodeId = wrapperId next
+                  (lhs',rhs')  = getVarsFromExp e
+                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
+                  cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId,nextNodeId] Neither 
+                  cfg0' = M.update (\n -> Just n{preds = nub $ (preds n) ++ [wrapNodeId]}) rhsNodeId cfg0                  
+                  cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0
+                  cfg1 = M.insert wrapNodeId cfgNode cfg0''
+            ; put st{cfg = cfg1, currPreds=[wrapNodeId], continuable = False}
+            ; caseExpsToIfNodes (next:ps)
+            }
+          caseExpsToIfNodes [(ExpCase e wrapNodeId rhsNodeId)]= do 
+            { st <- get
+            ; let preds0 = currPreds st
+                  cfg0 = cfg st 
+                  max  = currId st
+                  nextNodeId = internalIdent (labPref++show max)
+                  (lhs',rhs')  = getVarsFromExp e
+                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
+                  cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId,nextNodeId] Neither 
+                  cfg0' = M.update (\n -> Just n{preds = nub $ (preds n) ++ [wrapNodeId]}) rhsNodeId cfg0                  
+                  cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0
+                  cfg1 = M.insert wrapNodeId cfgNode cfg0''
+            ; put st{cfg = cfg1, currPreds=[wrapNodeId], continuable = False}
+            ; return [wrapNodeId] -- this is the last case exp (not a default), due to the if test, in case of false, we go to the following statement after the switch block
+            }
+                                                                        
+      ; put st1{currPreds = preds0}
+      ; mb_preds <- caseExpsToIfNodes caseNodes1
+      ; st2 <- get
+      ; put st2{currPreds = preds1 ++ breakNodes1 ++ mb_preds, continuable = False, breakNodes = breakNodes0, caseNodes=caseNodes0 }
+    }
 
 
 
-{-    
+{-    old way
 max1 = max + 1
 CFG1 = CFG \update { pred : { succ = {max} } } \union { max : { stmts = { if (exp == e1) { goto l1; } else if (exp == e2) { goto l2; } ... else { goto ldefault; } } },
                                                                 succs = {l1,l2,...,ldefault}, preds = preds }
@@ -428,7 +516,7 @@ CFG2' = CFG2 \update { { l : { preds = {max} } } | l \in {l1,...,l_default} and 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { stmt1,...,stmtn }   => CFG2', max2, preds2 \union breakNodes2 , false, breakNodes, contNodes2, caseNodes
 -}
-    
+{-    
     { st <- get 
     ; let max = currId st
           currNodeId = internalIdent (labPref++show max)          
@@ -467,6 +555,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
           cfg2''' = M.update (\n -> Just n{stmts = [ AST.CBlockStmt $ casesToIf caseNodes2 ], succs = (map (\(l,_) -> l) caseNodes2)}) currNodeId cfg2'' 
     ; put st1{cfg = cfg2''', currPreds = (currPreds st1) ++ breakNodes2, continuable=False, breakNodes = breakNodes0, caseNodes= caseNodes0}
     }
+-}
   -- | switch statement @CSwitch selectorExpr switchStmt@, where
   -- @switchStmt@ usually includes /case/, /break/ and /default/
   -- statements
@@ -719,6 +808,8 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
   -- | return statement @CReturn returnExpr@
   buildCFG (AST.CAsm asmb_stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++  "asmbly statement not supported." 
+
+
 
 instance CProg (AST.CCompoundBlockItem N.NodeInfo) where
   buildCFG (AST.CBlockStmt stmt) = buildCFG stmt
