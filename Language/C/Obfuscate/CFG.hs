@@ -29,7 +29,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/switch.c" --  "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/search.c" -- "test/switch.c" --  "test/sort.c" -- -} "test/fibiter.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -365,8 +365,7 @@ if (1) {
   stmts
 }
 -}
-  
-  -- buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') = getCInteger one == 1 = buildCFG compound
+  buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') | getCInteger one == 1 = buildCFG compound
   buildCFG (AST.CIf exp trueStmt mbFalseStmt nodeInfo) = 
     case mbFalseStmt of 
 {-  
@@ -454,7 +453,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
           -- this function has to be in the monad, because we only have the label of each case statement, but not the node.
           caseExpsToIfNodes ::  [CaseExp] ->  
                                 State StateInfo [NodeId] -- the returned list node ids capture last leaving (if wrapper) node, in case there is no default case 
-          caseExpsToIfNodes [] = return [] -- todo fix me: without default case
+          caseExpsToIfNodes [] = return [] 
           caseExpsToIfNodes ((DefaultCase wrapNodeId rhsNodeId):_) = do 
             { st <- get
             ; let preds0 = currPreds st
@@ -487,10 +486,11 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
             ; let preds0 = currPreds st
                   cfg0 = cfg st 
                   max  = currId st
-                  nextNodeId = internalIdent (labPref++show max)
+                  -- nextNodeId = internalIdent (labPref++show max)
                   (lhs',rhs')  = getVarsFromExp e
-                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
-                  cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId,nextNodeId] Neither 
+                  -- stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)] -- problem, the following statement is not neccessarily max2, i.e. the next available num. the next available num can be used in a sibling block, e.g. the current loop is in then branch, the next available int is usined in the else branch
+                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) Nothing N.undefNode)] -- leaving the else as Nothing first. We will update it to the right goto at insertGT after the succs of this node is updated.
+                  cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId{-,nextNodeId-} ] Neither 
                   cfg0' = M.update (\n -> Just n{preds = nub $ (preds n) ++ [wrapNodeId]}) rhsNodeId cfg0                  
                   cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0
                   cfg1 = M.insert wrapNodeId cfgNode cfg0''
@@ -590,17 +590,41 @@ CFG, max, preds, _, contNodes, breakNodes |- while (exp) { stmt } => CFG3, max2,
     ; st1 <- get
     ; let max2      = currId st1
           preds1    = currPreds st1
+          {- s         = AST.CBlockStmt $ AST.CIf exp  
+                      (AST.CGoto (internalIdent (labPref ++ show max1)) nodeInfo) 
+                      (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo -- problem, the following statement is not neccessarily max2, i.e. the next available num. the next available num can be used in a sibling block, e.g. the current loop is in then branch, the next available int is usined in the else branch for instance
+int search(int a[], int size, int x) {
+  if (a) { // 0
+    int i;  // 1
+    for (i=0 /* // 2 */; i< size; i++) // 3
+      {
+	// 4
+	if (a[i] == x) 
+	  { 
+	    return i; // 5
+	  }
+	// 6
+	// 7 i++
+      }
+  }
+  // 8 implicit else
+  // 9
+  return -1;
+}
+3 will have if ... { goto 4 } else { goto 8 } which is an else from the outer if statement 0.
+the correct translation should be  if ... { goto 4 } else { goto 9 }
+          -}
           s         = AST.CBlockStmt $ AST.CIf exp  
                       (AST.CGoto (internalIdent (labPref ++ show max1)) nodeInfo) 
-                      (Just (AST.CGoto (internalIdent (labPref ++ show max2)) nodeInfo)) nodeInfo
+                      Nothing nodeInfo -- we leave the else goto as Nothing first, we will fix it via insertGT when the succ is added.
           cfg2      = cfg st1
           cfg2'     = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) pred g) cfg2 preds1
           breakNodes2 = breakNodes st1
           contNodes2  = contNodes st1
           -- add the stmt back to the curr node (If statement)
-          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, succs=nub $ (succs n)++[internalIdent (labPref++show max2)], switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2'  -- preds n == preds0, preds1 are exits nodes from the loop body, contNodes2 are the continuation nodes from loop body,
+          cfg2''     = M.update (\n -> Just n{stmts=[s], preds=(preds n)++preds1++contNodes2, succs=nub $ (succs n) {-++[internalIdent (labPref++show max2)]-}, switchOrLoop=(IsLoop breakNodes2 contNodes2)}) currNodeId cfg2'  -- preds n == preds0, preds1 are exits nodes from the loop body, contNodes2 are the continuation nodes from loop body,
           cfg3       = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [currNodeId]}) l g) cfg2'' contNodes2 -- update the break and cont immediately
-          cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [internalIdent (labPref++show max2)]}) l g) cfg3 breakNodes2 
+          cfg3'      = foldl (\g l -> M.update (\n -> Just n{succs = nub $ (succs n) {- ++ [internalIdent (labPref++show max2)]-}}) l g) cfg3 breakNodes2 
     ; put st1{cfg = cfg3', currId=max2, currPreds=[currNodeId] ++ breakNodes2, continuable = False, contNodes = contNodes0, breakNodes = breakNodes0}
     }
 
@@ -1026,7 +1050,7 @@ getVarsFromExp (AST.CBuiltinExpr builtin )   = ([],[]) -- todo build in expressi
 
 
 -- ^ insert goto statement according to the succ 
--- ^ 1. skipping if statement
+-- ^ 1. insert the else goto in if statement if it's empty
 -- ^ 2. insert only the last statement is not goto
 -- ^ 3. if the block ends with break or continue, replace the last statement by goto 
 insertGotos :: CFG -> CFG
@@ -1081,7 +1105,17 @@ insertGotos cfg =
                    else g) cfg (M.toList cfg)
 
       insertGT :: Node -> Node 
-      insertGT node | containsIf (stmts node) = node
+      insertGT node | containsIf (stmts node) = case succs node of
+        { s@(_:_:_) -> case stmts node of 
+             { [ AST.CBlockStmt (AST.CIf e (AST.CGoto trLabel trNodeInfo) 
+                                 Nothing nodeInfo) ] -> 
+                  let elLabel = last s
+                      stmts' = [ AST.CBlockStmt (AST.CIf e (AST.CGoto trLabel trNodeInfo) 
+                                                 (Just (AST.CGoto elLabel N.undefNode)) nodeInfo) ] 
+                  in node{stmts = stmts'}
+             ; _ -> node
+             }
+        ; _ -> node }
                     | endsWithGoto (stmts node) = node
                     | endsWithBreak (stmts node) = case succs node of 
                       { [] -> node{stmts=(removeLast $ stmts node)}
