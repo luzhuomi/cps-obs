@@ -382,6 +382,7 @@ descendant ssa l = go ssa S.empty [l]
              else let new = filter (\x -> x `S.notMember` acc) adjs
                   in go ssa acc' (nub (ls ++ new))
 
+
 -- ^ pre condition, a path exists
 -- ^ compute the shortest path between nodes excluding the starting and ending nodes
 -- ^ result is in reversed order        
@@ -403,6 +404,8 @@ path ssa li lj = go ssa S.empty [[li]]
           in if not (null reached) 
              then Just $ head reached
              else go ssa visited' new_paths
+
+{-
 -- ^ return the last node before the destination if exists                  
 lastNodeInPath :: SSA -> NodeId -> NodeId -> Maybe NodeId
 lastNodeInPath ssa li lj = case path ssa li lj of             
@@ -411,7 +414,8 @@ lastNodeInPath ssa li lj = case path ssa li lj of
   ; _ -> Nothing
   }
 
--- ^ remove an edge from SSA                    
+-}
+-- ^ remove an edge (i,j) in SSA, i is the pred of j
 removeEdge :: SSA -> (NodeId, NodeId) -> SSA
 removeEdge ssa (li,lj) = 
   let lbs = labelled_blocks ssa
@@ -424,8 +428,14 @@ removeEdge ssa (li,lj) =
 
 
                     
-removeEdges :: SSA -> [(NodeId,NodeId)] -> SSA
-removeEdges ssa edges = foldl removeEdge ssa edges
+
+-- remove all the edges between node i and j, the edge will disconnect right preceding j
+removeEdges :: SSA -> NodeId -> NodeId -> SSA
+removeEdges ssa i j = case M.lookup j (labelled_blocks ssa ) of 
+  { Just n -> 
+       let preds = lb_preds n
+       in foldl (\ssa' pred -> removeEdge ssa' (pred,j)) ssa (filter (\pred -> pathExists ssa i pred) preds)
+  ; _ -> ssa }
 
 
 {-  The SSA Language
