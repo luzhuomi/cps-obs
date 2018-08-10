@@ -29,7 +29,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/switch.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/lastwhile.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -373,7 +373,25 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
       }
     else do 
       { mapM_ buildCFG blockItems
-      ; return ()
+      ; if (not (null blockItems)) 
+        then case last blockItems of 
+          { AST.CBlockStmt stmt | isWhileStmt stmt ->
+           -- the last blockItem is a while. e.g. 
+           {-
+int f() {
+  int c = 0;
+  while (1) {
+    if (c > 10)
+      return c;
+    c++;      
+  }
+  return; // inserted automatically
+}
+-}
+               buildCFG (AST.CReturn Nothing N.undefNode)
+          ; _ -> return () 
+          }
+        else return ()
       }
 {-
 to handle cases of  multi-line macro rhs declarations like

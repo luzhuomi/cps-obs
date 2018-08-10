@@ -150,3 +150,7 @@ ptrTyArg ty arg = AST.CDecl ty [(Just (AST.CDeclr (Just arg) [AST.CPtrDeclr [] N
 isCaseStmt :: AST.CStatement N.NodeInfo -> Bool 
 isCaseStmt (AST.CCase exp stmt nodeInfo) = True
 isCaseStmt _ = False
+
+isWhileStmt :: AST.CStatement N.NodeInfo -> Bool
+isWhileStmt (AST.CWhile exp stmt False nodeInfo) = True
+isWhileStmt _ = False
