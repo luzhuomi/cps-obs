@@ -29,7 +29,7 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
   { let opts = []
-  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/search.c" -- "test/switch.c" --  "test/sort.c" -- -} "test/fibiter.c"
+  ; ast <- errorOnLeftM "Parse Error" $ parseCFile (newGCC "gcc") Nothing opts "test/switch.c"
   ; case ast of 
     { AST.CTranslUnit (AST.CFDefExt fundef:_) nodeInfo -> 
          case runCFG fundef of
@@ -94,6 +94,7 @@ data StateInfo = StateInfo { currId :: Int -- ^ next available int for generatin
                            , breakNodes :: [NodeId]
                            , caseNodes :: [CaseExp] -- case node
                            , formalArgs :: [Ident] -- formal arguments
+                           , fallThroughCases :: [(AST.CExpression N.NodeInfo)]
                            } deriving Show
                  
 -- instance Show StateInfo where                 
@@ -104,21 +105,23 @@ data CaseExp = DefaultCase
                NodeId -- ^ the wrapper if statement node id in the translated AST
                NodeId -- ^ rhs node id
                
-             | ExpCase (AST.CExpression N.NodeInfo) 
+             | ExpCase 
+               (AST.CExpression N.NodeInfo) -- ^ the exp being checked against
+               [(AST.CExpression N.NodeInfo)]  -- ^ the preceding "fall-through" cases with empty exp if any
                NodeId -- ^ the wrapper if statement node id in the translated AST
                NodeId -- ^ rhs node id               
              deriving Show
 
 wrapperId :: CaseExp -> NodeId 
 wrapperId (DefaultCase l _ ) = l
-wrapperId (ExpCase e l _ ) = l
+wrapperId (ExpCase e es l _ ) = l
 
 
 labPref :: String
 labPref = "myLabel"
 
 
-initStateInfo = StateInfo 0 M.empty [] False [] [] [] []
+initStateInfo = StateInfo 0 M.empty [] False [] [] [] [] []
 
 
 
@@ -228,16 +231,29 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- stmt => CFG2, 
 CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => CFG2, max2, preds2 continuable2, breakNodes, contNodes2, caseNodes2 \union (max, e) 
 -}
   
-  buildCFG (AST.CCase exp stmt nodeInfo) = do 
-    { st <- get
-    ; let max        = currId st
-          wrapNodeId = internalIdent (labPref++show max) -- reserved for the wraper if statement in the translation
-          rhsNodeId = internalIdent (labPref++show (max+1))          
-    ; put st{currId = max + 1}
-    ; buildCFG stmt 
-    ; st1 <- get
-    ; put st1{caseNodes=(caseNodes st1)++[(ExpCase exp wrapNodeId rhsNodeId)]}
-    }
+  buildCFG (AST.CCase exp stmt nodeInfo) = 
+    if (isCaseStmt stmt)  
+    then do 
+        {- empty fall through case,
+            case 2:
+            case 3: e
+          -}
+      { st <- get
+      ; let fallThrough = fallThroughCases st
+      ; put st{fallThroughCases=fallThrough ++ [ exp ]}
+      ; buildCFG stmt
+      }
+    else do 
+      { st <- get
+      ; let max        = currId st
+            fallThrough = fallThroughCases st
+            wrapNodeId = internalIdent (labPref++show max) -- reserved for the wraper if statement in the translation
+            rhsNodeId = internalIdent (labPref++show (max+1))          
+      ; put st{currId = max + 1, fallThroughCases=[]} -- empty the fallthru
+      ; buildCFG stmt 
+      ; st1 <- get
+      ; put st1{caseNodes=(caseNodes st1)++[(ExpCase exp fallThrough wrapNodeId rhsNodeId)]}
+      }
 
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
     fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
@@ -251,7 +267,7 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- default: stmt =>
     ; let max        = currId st
           wrapNodeId = internalIdent (labPref++show max) -- reserved for the wraper if statement in the translation
           rhsNodeId = internalIdent (labPref++show (max+1))          
-    ; put st{currId = max + 1}          
+    ; put st{currId = max + 1, fallThroughCases=[]}          
     ; buildCFG stmt 
     ; st1 <- get
     ; put st1{caseNodes=(caseNodes st1)++[(DefaultCase wrapNodeId rhsNodeId)]}
@@ -442,7 +458,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
           contNodes0 = contNodes st
           breakNodes0 = breakNodes st
           caseNodes0 = caseNodes st
-    ; put st{currPreds=[], continuable = False, breakNodes = [], caseNodes = [] }
+    ; put st{currPreds=[], fallThroughCases=[], continuable = False, breakNodes = [], caseNodes = [] }
     ; buildCFG swStmt
     ; st1 <- get 
     ; let
@@ -467,13 +483,14 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
             ; put st{cfg = cfg1, currPreds=[wrapNodeId], continuable = False}
             ; return [] -- no extra predessor id to pass
             }
-          caseExpsToIfNodes ((ExpCase e wrapNodeId rhsNodeId):next:ps)= do 
+          caseExpsToIfNodes ((ExpCase e es wrapNodeId rhsNodeId):next:ps)= do 
             { st <- get
             ; let preds0 = currPreds st
                   cfg0 = cfg st 
                   nextNodeId = wrapperId next
                   (lhs',rhs')  = getVarsFromExp e
-                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
+                  cond = foldl (\a e -> ((exp .==. e) .||. a)) (exp .==. e) es 
+                  stmts = [AST.CBlockStmt (AST.CIf cond (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
                   cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId,nextNodeId] Neither 
                   cfg0' = M.update (\n -> Just n{preds = nub $ (preds n) ++ [wrapNodeId]}) rhsNodeId cfg0                  
                   cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0
@@ -481,7 +498,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
             ; put st{cfg = cfg1, currPreds=[wrapNodeId], continuable = False}
             ; caseExpsToIfNodes (next:ps)
             }
-          caseExpsToIfNodes [(ExpCase e wrapNodeId rhsNodeId)]= do 
+          caseExpsToIfNodes [(ExpCase e es wrapNodeId rhsNodeId)]= do 
             { st <- get
             ; let preds0 = currPreds st
                   cfg0 = cfg st 
@@ -489,7 +506,9 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
                   -- nextNodeId = internalIdent (labPref++show max)
                   (lhs',rhs')  = getVarsFromExp e
                   -- stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)] -- problem, the following statement is not neccessarily max2, i.e. the next available num. the next available num can be used in a sibling block, e.g. the current loop is in then branch, the next available int is usined in the else branch
-                  stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) Nothing N.undefNode)] -- leaving the else as Nothing first. We will update it to the right goto at insertGT after the succs of this node is updated.
+
+                  cond = foldl (\a e -> ((exp .==. e) .||. a)) (exp .==. e) es 
+                  stmts = [AST.CBlockStmt (AST.CIf cond (AST.CGoto rhsNodeId N.undefNode) Nothing N.undefNode)] -- leaving the else as Nothing first. We will update it to the right goto at insertGT after the succs of this node is updated.
                   cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId{-,nextNodeId-} ] Neither 
                   cfg0' = M.update (\n -> Just n{preds = nub $ (preds n) ++ [wrapNodeId]}) rhsNodeId cfg0                  
                   cfg0'' = foldl (\g pred -> M.update (\n -> Just n{succs = nub $ (succs n) ++ [wrapNodeId]}) pred g) cfg0' preds0

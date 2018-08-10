@@ -33,6 +33,7 @@ isTypeSpec _ = False
 
 
 
+
 isInlineFun :: AST.CFunctionDef N.NodeInfo -> Bool
 isInlineFun (AST.CFunDef tySpecfs declarator decls stmt nodeInfo) = 
   any isInlineTyQual tySpecfs
@@ -82,6 +83,11 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 (.==.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.==.) lhs rhs = AST.CBinary AST.CEqOp lhs rhs N.undefNode
 
+-- ^ logical or
+(.||.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.||.) e1 e2 = AST.CBinary AST.CLorOp e1 e2 N.undefNode
+
+
 (.->.) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
 (.->.) struct member = AST.CMember struct member True N.undefNode
 
@@ -91,6 +97,8 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 -- ^ array idex
 (.!!.) :: AST.CExpression N.NodeInfo ->  AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.!!.) arr idx = AST.CIndex arr idx N.undefNode
+
+
 
 cvar :: Ident -> AST.CExpression N.NodeInfo
 cvar id = AST.CVar id N.undefNode
@@ -138,3 +146,7 @@ ptrTyArg ty arg = AST.CDecl ty [(Just (AST.CDeclr (Just arg) [AST.CPtrDeclr [] N
            AST.CDeclaration N.NodeInfo
 (.::*.) arg ty = ptrTyArg ty arg
 
+
+isCaseStmt :: AST.CStatement N.NodeInfo -> Bool 
+isCaseStmt (AST.CCase exp stmt nodeInfo) = True
+isCaseStmt _ = False

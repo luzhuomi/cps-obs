@@ -308,7 +308,7 @@ CL_cps l_i kenv cfg
              bind_iD = fun tyVoid bind_i [paramCtxt] bindStmts 
              
         in (f_iD:bind_iD:ds, cvar bind_i) 
-    ; [ l_j, l_k ] | pathExists cfg l_j l_i && pathExists cfg l_k l_i -> error "syntactic non-terminalting loop" 
+    ; [ l_j, l_k ] | pathExists cfg l_j l_i && pathExists cfg l_k l_i -> error ("syntactic non-terminating loop" ++  (show (M.lookup l_i kenv)))
     ; [ l_j, l_k ] | pathExists cfg l_j l_i -> 
 {-
 -- in target langauge
@@ -340,7 +340,7 @@ CL_cps l_i kenv cfg
              { Just n -> case lb_stmts n of  
                   { [ AST.CBlockStmt 
                       (AST.CIf exp trueStmt@(AST.CGoto l_j _) (Just falseStmt@(AST.CGoto l_k _)) nodeInfo) ] -> 
-                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv (removeEdge cfg ((fromJust $ lastNodeInPath cfg l_j l_i), l_i))
+                       let (d_j,e_j) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_j kenv (removeEdge cfg ((fromJust $ lastNodeInPath cfg l_j l_i), l_i)) -- we need to remove all edges
                            (d_k,e_k) = cps_trans_lb isReturnVoid localVars fargs ctxtName fname l_k kenv cfg
                            exp'      = cps_trans_exp localVars fargs ctxtName exp
                            tyVoid    = [AST.CTypeSpec (AST.CVoidType N.undefNode)]

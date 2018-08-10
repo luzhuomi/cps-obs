@@ -1,9 +1,10 @@
 int f(int x) {
-  switch(x) {
-  case 1:
+  switch(x) { 
+  case 1: 
     x = x + 1;
     break;
-  case 2:
+  case 2: 
+  case 3:
     x = x + 2;
     return x;
   default:
