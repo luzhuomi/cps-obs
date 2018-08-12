@@ -83,7 +83,7 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 (.==.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.==.) lhs rhs = AST.CBinary AST.CEqOp lhs rhs N.undefNode
 
--- ^ logical or
+-- ^ boolean or
 (.||.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.||.) e1 e2 = AST.CBinary AST.CLorOp e1 e2 N.undefNode
 
@@ -98,6 +98,10 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 (.!!.) :: AST.CExpression N.NodeInfo ->  AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.!!.) arr idx = AST.CIndex arr idx N.undefNode
 
+
+-- ^ boolean not
+cnot :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+cnot e = AST.CUnary AST.CNegOp e N.undefNode
 
 
 cvar :: Ident -> AST.CExpression N.NodeInfo
@@ -147,6 +151,7 @@ ptrTyArg ty arg = AST.CDecl ty [(Just (AST.CDeclr (Just arg) [AST.CPtrDeclr [] N
 (.::*.) arg ty = ptrTyArg ty arg
 
 
+
 isCaseStmt :: AST.CStatement N.NodeInfo -> Bool 
 isCaseStmt (AST.CCase exp stmt nodeInfo) = True
 isCaseStmt _ = False
@@ -154,3 +159,15 @@ isCaseStmt _ = False
 isWhileStmt :: AST.CStatement N.NodeInfo -> Bool
 isWhileStmt (AST.CWhile exp stmt False nodeInfo) = True
 isWhileStmt _ = False
+
+
+isEmptyStmt :: AST.CStatement N.NodeInfo -> Bool
+isEmptyStmt stmt = isEmptyCmpdStmt stmt || isEmptyExpStmt stmt
+
+isEmptyCmpdStmt (AST.CCompound _ [] _) = True 
+isEmptyCmpdStmt (AST.CCompound _ blks _) = all (\blk -> case blk of { AST.CBlockStmt (AST.CExpr Nothing _) -> True
+                                                                    ; _ -> False }) blks
+isEmptyCmpdStmt _ = False
+
+isEmptyExpStmt (AST.CExpr Nothing _) = True
+isEmptyExpStmt _ = False

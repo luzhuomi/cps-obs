@@ -7,6 +7,8 @@ import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
+import qualified Language.C.Syntax.AST as AST
+
 
 usageMsg :: String -> String
 usageMsg prg = render $ text "Usage:" <+> text prg <+> hsep (map text ["CPP_OPTIONS","input_file.c"])
@@ -25,7 +27,11 @@ main = do
   -- ast <- errorOnLeftM "Parse Error" $ parseCFilePre input_file
   -- putStrLn (render $ pretty ast)
   putStrLn (show ast)
-
+  {-
+  case ast of 
+    {AST.CTranslUnit decls _ -> mapM_ (\decl -> putStrLn (show decl) >> putStrLn "=====================" ) decls
+    }
+  -}
 errorOnLeft :: (Show a) => String -> (Either a b) -> IO b
 errorOnLeft msg = either (error . ((msg ++ ": ")++).show) return
 

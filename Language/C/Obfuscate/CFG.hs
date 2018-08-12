@@ -25,6 +25,8 @@ import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 
+import System.IO.Unsafe (unsafePerformIO)
+
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 testCFG = do 
@@ -400,6 +402,9 @@ if (1) {
 }
 -}
   buildCFG (AST.CIf (AST.CConst (AST.CIntConst one nodeInf)) compound Nothing nodeInf') | getCInteger one == 1 = buildCFG compound
+  -- empty true statment
+  {- if e { ; } else { s } ---> if (!e) { s } -}
+  buildCFG (AST.CIf exp trueStmt (Just falseStmt) nodeInfo) | isEmptyStmt trueStmt = {- let io = unsafePerformIO (putStrLn (show nodeInfo)) in io `seq` -} buildCFG (AST.CIf (cnot exp) falseStmt Nothing nodeInfo)
   buildCFG (AST.CIf exp trueStmt mbFalseStmt nodeInfo) = 
     case mbFalseStmt of 
 {-  

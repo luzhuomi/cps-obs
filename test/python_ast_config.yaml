@@ -11,7 +11,6 @@ whitelist:
     - set_context
     - ast_for_augassign
     - ast_for_comp_op
-    - seq_for_testlist
     - compiler_complex_args
     - ast_for_dotted_name
     - ast_for_decorator
@@ -20,8 +19,6 @@ whitelist:
     - ast_for_decorated
     - ast_for_lambdef
     - ast_for_ifexpr
-    - count_list_fors
-    - count_list_ifs
     - ast_for_listcomp
     - count_comp_fors
     - count_comp_ifs
@@ -39,10 +36,8 @@ whitelist:
     - ast_for_testlist_comp
     - ast_for_class_bases
     - ast_for_expr_stmt
-    - ast_for_exprlist
     - ast_for_del_stmt
     - ast_for_flow_stmt
-    - ast_for_global_stmt
     - ast_for_exec_stmt
     - ast_for_assert_stmt
     - ast_for_while_stmt
@@ -53,23 +48,43 @@ whitelist:
     - ast_for_classdef
     - parsenumber
     - decode_utf8
-    - decode_unicode
-
+    - ast_for_stmt
 # blacklist has no effect for now
 blacklist:
-    - parsestrplus
-    - ast_for_expr
-    - ast_for_stmt    
-    - num_stmts (segfault)
-    - PyAST_FromNode (segfault)
+
+    
+# new    
+    - seq_for_testlist (assertion failed)
+    - count_list_fors (assertion failed)
+    - count_list_ifs (assertion failed)
+
+    - ast_for_exprlist (segfault)
+    - ast_for_global_stmt (segfault)
+    - decode_unicode (segfault)
+
+# old
+    - ast_for_expr (inf loop)
+    - ast_for_expr (inf loop)
+
+    - alias_for_import_name (too many arguments to function call)
+
+    - parsestrplus (segfault)
     - parsestr (segfault)
     - ast_for_suite (segfault)
-    - ast_for_print_stmt (system error unhandled expr 12)
-    - ast_for_atom (system error unhandled expr 11)
-    - parsestrplus (Assertion failed)
-    - ast_for_power (Assertion failed)
-    - ast_for_expr (Assertion failed)
-    - ast_for_with_stmt (Assertion failed)
-    - ast_for_import_stmt (Assertion failed)
-    - alias_for_import_name (memory error)
-    - ast_for_if_stmt (ValueError unknown major BerkeleyDB version failed to handle python if stmt)
+    - PyAST_FromNode (SystemError)
+
+    - num_stmts (assertion failed)
+    - ast_for_print_stmt (assertion failed)
+    - ast_for_atom (assertion failed)
+    - parsestrplus (assertion failed)
+    - ast_for_power (assertion failed)
+    - ast_for_with_stmt (assertion failed)
+    - ast_for_import_stmt (assertion failed)    
+    - ast_for_if_stmt (assertion failed)
+    - ast_for_if_stmt (assertion failed)
+    # most the assertion failed says (TYPE(n) == (336)), function count_comp_fors_cppobs_myLabel1, file ast_orig.c, line 1171.
+    # skipping obs count_comp_fors leads to segfault in these function
+
+
+
+
