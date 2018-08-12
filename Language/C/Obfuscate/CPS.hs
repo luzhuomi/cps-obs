@@ -93,17 +93,17 @@ ifcPopName = "ifc_pop"
 lambdaIfcName = "lambda_ifc"
 
 
-loopCondName = "loopCond"
-loopVisitName = "loopVisit"
-loopExitName = "loopExit"
-loopName   = "loop"
+loopCondName = "loopcCond"
+loopVisitName = "loopcVisit"
+loopExitName = "loopcExit"
+loopName   = "loopc"
 
-loopPushName = "loop_push"
-loopPeekCName = "loop_peek_c"
-loopPeekVName = "loop_peek_v"
-loopPeekEName = "loop_peek_e"
-loopPopName = "loop_pop"
-lambdaLoopName = "lambda_loop"
+loopPushName = "loopc_push"
+loopPeekCName = "loopc_peek_c"
+loopPeekVName = "loopc_peek_v"
+loopPeekEName = "loopc_peek_e"
+loopPopName = "loopc_pop"
+lambdaLoopName = "lambda_loopc"
 
 
 kPeekName = "k_peek"
@@ -134,9 +134,9 @@ ifcStackTop = "ifc_stack_top"
 bindStackTop = "bind_stack_top"
 
 kStackName = "k_stack"
-loopStackCName = "loop_stack_c"
-loopStackVName = "loop_stack_v"
-loopStackEName = "loop_stack_e"
+loopStackCName = "loopc_stack_c"
+loopStackVName = "loopc_stack_v"
+loopStackEName = "loopc_stack_e"
 
 ifcStackCName = "ifc_stack_c"
 ifcStackTrName = "ifc_stack_tr"
@@ -146,10 +146,6 @@ bindStackFName = "bind_stack_f"
 bindStackMName = "bind_stack_m"
 
 
-
-
--- todo : remove
-currStackSizeName = "curr_stack_size"
 
 {-
 class CPSize ssa cps where

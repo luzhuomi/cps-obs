@@ -48,7 +48,7 @@ whitelist:
     - ast_for_classdef
     - parsenumber
     - decode_utf8
-    - ast_for_stmt
+
 # blacklist has no effect for now
 blacklist:
 
@@ -64,13 +64,11 @@ blacklist:
 
 # old
     - ast_for_expr (inf loop)
-    - ast_for_expr (inf loop)
-
-    - alias_for_import_name (too many arguments to function call)
 
     - parsestrplus (segfault)
     - parsestr (segfault)
     - ast_for_suite (segfault)
+    - alias_for_import_name (segfault)
     - PyAST_FromNode (SystemError)
 
     - num_stmts (assertion failed)
@@ -81,7 +79,7 @@ blacklist:
     - ast_for_with_stmt (assertion failed)
     - ast_for_import_stmt (assertion failed)    
     - ast_for_if_stmt (assertion failed)
-    - ast_for_if_stmt (assertion failed)
+    
     # most the assertion failed says (TYPE(n) == (336)), function count_comp_fors_cppobs_myLabel1, file ast_orig.c, line 1171.
     # skipping obs count_comp_fors leads to segfault in these function
 
