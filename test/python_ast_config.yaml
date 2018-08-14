@@ -20,8 +20,7 @@ whitelist:
     - ast_for_lambdef
     - ast_for_ifexpr
     - ast_for_listcomp
-    - count_comp_fors
-    - count_comp_ifs
+
     - ast_for_comprehension
     - ast_for_itercomp
     - ast_for_dictcomp
@@ -33,21 +32,27 @@ whitelist:
     - ast_for_factor
     - ast_for_call
     - ast_for_testlist
+
     - ast_for_testlist_comp
     - ast_for_class_bases
-    - ast_for_expr_stmt
-    - ast_for_del_stmt
+
     - ast_for_flow_stmt
+
     - ast_for_exec_stmt
     - ast_for_assert_stmt
     - ast_for_while_stmt
     - ast_for_for_stmt
+
+
     - ast_for_except_clause
     - ast_for_try_stmt
     - ast_for_with_item
     - ast_for_classdef
     - parsenumber
     - decode_utf8
+
+     
+    
 
 # blacklist has no effect for now
 blacklist:
@@ -74,7 +79,6 @@ blacklist:
     - num_stmts (assertion failed)
     - ast_for_print_stmt (assertion failed)
     - ast_for_atom (assertion failed)
-    - parsestrplus (assertion failed)
     - ast_for_power (assertion failed)
     - ast_for_with_stmt (assertion failed)
     - ast_for_import_stmt (assertion failed)    
@@ -84,5 +88,9 @@ blacklist:
     # skipping obs count_comp_fors leads to segfault in these function
 
 
+    - ast_for_del_stmt (segfault)
+    - ast_for_expr_stmt (segfault)
 
 
+    - count_comp_fors
+    - count_comp_ifs

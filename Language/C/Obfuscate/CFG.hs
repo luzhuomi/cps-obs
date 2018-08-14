@@ -511,7 +511,8 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
             ; let preds0 = currPreds st
                   cfg0 = cfg st 
                   nextNodeId = wrapperId next
-                  (lhs',rhs')  = getVarsFromExp e
+                  (lhs',rhs')  = case (unzip (map getVarsFromExp (e:es))) of { (ls, rs) -> (concat ls, concat rs) }
+                  -- (lhs',rhs')  = getVarsFromExp e
                   cond = foldl (\a e -> ((exp .==. e) .||. a)) (exp .==. e) es 
                   stmts = [AST.CBlockStmt (AST.CIf cond (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)]
                   cfgNode = Node stmts (nub $ lhs ++ lhs') (nub $ rhs ++ rhs') [] preds0 [rhsNodeId,nextNodeId] Neither 
@@ -527,7 +528,9 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
                   cfg0 = cfg st 
                   max  = currId st
                   -- nextNodeId = internalIdent (labPref++show max)
-                  (lhs',rhs')  = getVarsFromExp e
+                  (lhs',rhs')  = case (unzip (map getVarsFromExp (e:es))) of { (ls, rs) -> (concat ls, concat rs) }
+                  -- (lhs',rhs')  = getVarsFromExp e
+
                   -- stmts = [AST.CBlockStmt (AST.CIf (exp .==. e) (AST.CGoto rhsNodeId N.undefNode) (Just (AST.CGoto nextNodeId N.undefNode)) N.undefNode)] -- problem, the following statement is not neccessarily max2, i.e. the next available num. the next available num can be used in a sibling block, e.g. the current loop is in then branch, the next available int is usined in the else branch
 
                   cond = foldl (\a e -> ((exp .==. e) .||. a)) (exp .==. e) es 
