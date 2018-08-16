@@ -4,6 +4,7 @@ import qualified Language.C.Syntax.AST as AST
 import Language.C.Obfuscate.CFG 
 import Language.C.Obfuscate.SSA
 import Language.C.Obfuscate.CPS
+import Language.C.Obfuscate.CFF
 import Language.C.Obfuscate.ASTUtils
 
 import Language.C (parseCFile, parseCFilePre)
@@ -73,8 +74,10 @@ main = do
                               case runCFG fundef of
                                 { CFGOk (_, state) -> do 
                                      { let ssa = buildSSA (cfg state) (formalArgs state)
-                                           cps = ssa2cps fundef ssa 
-                                     ; appendFile dest (prettyCPS cps) 
+                                     --      cps = ssa2cps fundef ssa 
+                                     -- ; appendFile dest (prettyCPS cps) 
+                                           cff = ssa2cff fundef ssa
+                                     ; appendFile dest (prettyCFF cff)
                                      ; appendFile dest "\n"
                                      }
                                 ; CFGError s       -> error s

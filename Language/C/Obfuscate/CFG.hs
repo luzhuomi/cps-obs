@@ -8,6 +8,7 @@ module Language.C.Obfuscate.CFG
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.List (nub)
+import Data.Char (isDigit)
 import qualified Language.C.Syntax.AST as AST
 import qualified Language.C.Data.Node as N 
 import Language.C.Syntax.Constants
@@ -121,6 +122,15 @@ wrapperId (ExpCase e es l _ ) = l
 
 labPref :: String
 labPref = "myLabel"
+
+-- remove the label pref to obtain int id, if not possible use the id name string hash
+unLabPref :: Ident -> Integer
+unLabPref (Ident s hash _) = 
+  let suf = drop (length labPref) s
+  in if (not (null suf)) && (all isDigit suf)
+     then read suf
+     else fromIntegral hash
+
 
 
 initStateInfo = StateInfo 0 M.empty [] False [] [] [] [] []

@@ -756,6 +756,13 @@ cps_trans_exp localVars fargs ctxtName (AST.CBuiltinExpr builtin )          = AS
 {-
 top level translation   p => P
 
+CP_cps (t' f (t x) { \overline{d}; \overline{b} }) = T' F (T X) { \overline{D''}; T' res; void ign ; ign = E(id) ; return res; }
+   where   T' = t'   F = f   T = t     X = x
+           \overline{D}  = CD_cps \overline{d}
+           (kenv, l_entry) = B_ssa \overline{b}
+           (\overline{D'}, E) = CL_cps l_entry kenv G(kenv)
+           \overline{D''} = \overline{D}; loopDelc; idDecl; seqDelc; condDecl; retDecl; \overline{D'}
+
 -}
 -- our target language C differs from the above specification.                          
 -- 1. the top function's type signature is not captured within SSA

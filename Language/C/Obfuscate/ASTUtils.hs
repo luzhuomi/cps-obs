@@ -171,3 +171,20 @@ isEmptyCmpdStmt _ = False
 
 isEmptyExpStmt (AST.CExpr Nothing _) = True
 isEmptyExpStmt _ = False
+
+
+cSwitch :: AST.CExpression N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo] -> AST.CCompoundBlockItem N.NodeInfo
+cSwitch e cases = 
+  AST.CBlockStmt (AST.CSwitch e (AST.CCompound [] cases N.undefNode) N.undefNode)
+
+cCase :: AST.CExpression N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo] -> [AST.CCompoundBlockItem N.NodeInfo]
+cCase e [] = [AST.CBlockStmt (AST.CCase e (AST.CExpr Nothing N.undefNode) N.undefNode)]
+cCase e ((AST.CBlockStmt stmt):blkItems) = (AST.CBlockStmt (AST.CCase e stmt N.undefNode)):blkItems 
+
+cBreak :: AST.CCompoundBlockItem N.NodeInfo 
+cBreak = AST.CBlockStmt (AST.CBreak N.undefNode)
+
+
+cWhile :: AST.CExpression N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo] -> AST.CCompoundBlockItem N.NodeInfo
+cWhile e stmts = 
+  AST.CBlockStmt (AST.CWhile e (AST.CCompound [] stmts N.undefNode) False N.undefNode)

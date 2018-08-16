@@ -11,7 +11,12 @@ void f () {
 */
 
 void f(int x) {
-  if ((x == 1) || (x == 2)) {
-     return;
+  switch (x) {
+  case 1:
+    x = x + 1;
+    break;
+  default:
+    int y = 2;
+    break;
   }
 }
