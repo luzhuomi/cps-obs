@@ -397,10 +397,12 @@ int f() {
       return c;
     c++;      
   }
-  return; // inserted automatically
+  1 == 1; // inserted automatically
 }
 -}
-               buildCFG (AST.CReturn Nothing N.undefNode)
+               let one = AST.CConst (AST.CIntConst (cInteger 1) N.undefNode) 
+               in buildCFG (AST.CExpr (Just (one .==. one)) N.undefNode) 
+               -- buildCFG (AST.CReturn Nothing N.undefNode) -- does not work if the function's return type is not void
           ; _ -> return () 
           }
         else return ()

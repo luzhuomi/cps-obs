@@ -5,7 +5,6 @@ int f() {
       return c;
     c++;      
   }
-  // return;
 }
 
 int main() {

@@ -11,12 +11,5 @@ void f () {
 */
 
 void f(int x) {
-  switch (x) {
-  case 1:
-    x = x + 1;
-    break;
-  default:
-    int y = 2;
-    break;
-  }
+  1==1;
 }
