@@ -1,7 +1,7 @@
 # location of the preprocessor
 gcc: gcc
 # functions to be obfusicated
-whitelist:
+cps:
     - new_identifier
     - ast_error
     - ast_error_finish
@@ -53,6 +53,9 @@ whitelist:
     - decode_utf8
     - decode_unicode
     - ast_for_stmt
+
+cff: []
+
 
 
 # blacklist has no effect for now

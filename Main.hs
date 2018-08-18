@@ -30,7 +30,8 @@ isMain fundef = case getFunName fundef of
 data Config =
   Config {
     gcc :: Text
-  , whitelist :: [Text]
+  , cps :: [Text]
+  , cff :: [Text]
   , blacklist :: [Text]
   } deriving (Eq, Show)
 
@@ -39,7 +40,8 @@ instance FromJSON Config where
   parseJSON (Y.Object v) =
     Config <$>
     v .:   (pack "gcc")       <*>
-    v .:   (pack "whitelist") <*>
+    v .:   (pack "cps")       <*>
+    v .:   (pack "cff")       <*>
     v .:   (pack "blacklist")
   parseJSON _ = fail "Expected Object for Config value"
 
@@ -61,21 +63,38 @@ main = do
       ; case ast of 
         { AST.CTranslUnit defs nodeInfo -> do 
              { writeFile dest ""
-             ; let wl = S.fromList (map unpack (whitelist config))
-                   isWhiteListed fundef 
-                     | S.null wl = True  -- if the white list is empty, everything is in the white list
+             ; let cpswl = S.fromList (map unpack (cps config))
+                   cffwl = S.fromList (map unpack (cff config))
+                   isCPS fundef 
+                     | "*" `S.member` cpswl = True  
                      | otherwise = case getFunName fundef of 
                        { Nothing -> False
-                       ; Just n  -> n `S.member` wl}
+                       ; Just n  -> n `S.member` cpswl}
+                   isCFF fundef 
+                     | "*" `S.member` cffwl = True  
+                     | otherwise = case getFunName fundef of 
+                       { Nothing -> False
+                       ; Just n  -> n `S.member` cffwl}
+
              ; mapM_ (\def -> case def of 
                          { AST.CFDefExt fundef | not (isMain fundef) && 
                                                  not (isInlineFun fundef) && 
-                                                 isWhiteListed fundef -> 
+                                                 isCPS fundef -> 
                               case runCFG fundef of
                                 { CFGOk (_, state) -> do 
                                      { let ssa = buildSSA (cfg state) (formalArgs state)
-                                     --      cps = ssa2cps fundef ssa 
-                                     -- ; appendFile dest (prettyCPS cps) 
+                                           cps = ssa2cps fundef ssa 
+                                     ; appendFile dest (prettyCPS cps) 
+                                     ; appendFile dest "\n"
+                                     }
+                                ; CFGError s       -> error s
+                                }
+                         ; AST.CFDefExt fundef | not (isMain fundef) && 
+                                                 not (isInlineFun fundef) && 
+                                                 isCFF fundef -> 
+                              case runCFG fundef of
+                                { CFGOk (_, state) -> do 
+                                     { let ssa = buildSSA (cfg state) (formalArgs state)
                                            cff = ssa2cff fundef ssa
                                      ; appendFile dest (prettyCFF cff)
                                      ; appendFile dest "\n"

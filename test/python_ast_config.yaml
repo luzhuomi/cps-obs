@@ -1,7 +1,7 @@
 # location of the preprocessor
 gcc: /usr/local/bin/gcc-7
 # functions to be obfusicated
-whitelist:
+cps:
     - new_identifier
     - ast_error
     - ast_error_finish
@@ -51,7 +51,7 @@ whitelist:
     - parsenumber
     - decode_utf8
 
-     
+cpp: []  
     
 
 # blacklist has no effect for now

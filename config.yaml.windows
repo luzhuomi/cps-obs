@@ -2,7 +2,10 @@
 gcc: cc
 
 # functions to be obfusicated
-whitelist: [] 
+cps: 
+  - *
+
+cff: []
 
 # blacklist has no effect for now
 blacklist: []
