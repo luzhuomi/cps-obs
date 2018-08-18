@@ -160,6 +160,11 @@ isWhileStmt :: AST.CStatement N.NodeInfo -> Bool
 isWhileStmt (AST.CWhile exp stmt False nodeInfo) = True
 isWhileStmt _ = False
 
+isForStmt :: AST.CStatement N.NodeInfo -> Bool
+isForStmt (AST.CFor init test exp stmt nodeInfo) = True
+isForStmt _ = False
+
+
 
 isEmptyStmt :: AST.CStatement N.NodeInfo -> Bool
 isEmptyStmt stmt = isEmptyCmpdStmt stmt || isEmptyExpStmt stmt

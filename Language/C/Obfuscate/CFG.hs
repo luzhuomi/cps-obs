@@ -387,7 +387,7 @@ CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- switch exp { s
       { mapM_ buildCFG blockItems
       ; if (not (null blockItems)) 
         then case last blockItems of 
-          { AST.CBlockStmt stmt | isWhileStmt stmt ->
+          { AST.CBlockStmt stmt | isWhileStmt stmt || isForStmt stmt ->
            -- the last blockItem is a while. e.g. 
            {-
 int f() {

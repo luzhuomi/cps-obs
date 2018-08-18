@@ -136,6 +136,8 @@ cff_trans_stmt isReturnVoid localVars fargs ctxtName fname sw kenv l_k (AST.CBlo
       falseStmt' = cff_trans_stmt isReturnVoid localVars fargs ctxtName fname sw kenv l_k (AST.CBlockStmt falseStmt)
   in [ AST.CBlockStmt (AST.CIf e' (AST.CCompound [] trueStmt' N.undefNode) (Just (AST.CCompound [] falseStmt' N.undefNode)) nodeInfo) ]
      
+cff_trans_stmt isReturnVoid localVars fargs ctxtName fname sw kenv l_k b = error ("cff_trans_stmt : unsupported case " ++ (render $ pretty b))
+
      
 cff_trans_phis = cps_trans_phis
 cff_trans_exp = cps_trans_exp
