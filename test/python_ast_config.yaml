@@ -1,7 +1,10 @@
 # location of the preprocessor
 gcc: /usr/local/bin/gcc-7
 # functions to be obfusicated
-cps:
+cps: []
+    
+
+cff:
     - new_identifier
     - ast_error
     - ast_error_finish
@@ -51,26 +54,26 @@ cps:
     - parsenumber
     - decode_utf8
 
-cpp: []  
-    
+    # the following functions can be obf'ed using cff but not cps. error: assertion fail
+    - count_list_fors
+    - decode_unicode
+    - parsestrplus
 
+    
 # blacklist has no effect for now
 blacklist:
 
     
 # new    
     - seq_for_testlist (assertion failed)
-    - count_list_fors (assertion failed)
     - count_list_ifs (assertion failed)
 
     - ast_for_exprlist (segfault)
     - ast_for_global_stmt (segfault)
-    - decode_unicode (segfault)
 
 # old
     - ast_for_expr (inf loop)
 
-    - parsestrplus (segfault)
     - parsestr (segfault)
     - ast_for_suite (segfault)
     - alias_for_import_name (segfault)
@@ -78,7 +81,6 @@ blacklist:
 
     - num_stmts (assertion failed)
     - ast_for_print_stmt (assertion failed)
-    - ast_for_atom (assertion failed)
     - ast_for_power (assertion failed)
     - ast_for_with_stmt (assertion failed)
     - ast_for_import_stmt (assertion failed)    
@@ -87,8 +89,9 @@ blacklist:
     # most the assertion failed says (TYPE(n) == (336)), function count_comp_fors_cppobs_myLabel1, file ast_orig.c, line 1171.
     # skipping obs count_comp_fors leads to segfault in these function
 
+    - ast_for_atom
+    - ast_for_del_stmt
 
-    - ast_for_del_stmt (segfault)
     - ast_for_expr_stmt (segfault)
 
 
