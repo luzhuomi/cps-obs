@@ -3,10 +3,9 @@ gcc: /usr/local/bin/gcc-7
 
 # functions to be obfusicated
 cps: 
-  - . # all functions
+    - . # all files
 
-cff: []
-
+cff: [] 
 
 # blacklist has no effect for now
 blacklist: []

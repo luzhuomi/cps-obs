@@ -66,12 +66,12 @@ main = do
              ; let cpswl = S.fromList (map unpack (cps config))
                    cffwl = S.fromList (map unpack (cff config))
                    isCPS fundef 
-                     | "*" `S.member` cpswl = True  
+                     | "." `S.member` cpswl = True  
                      | otherwise = case getFunName fundef of 
                        { Nothing -> False
                        ; Just n  -> n `S.member` cpswl}
                    isCFF fundef 
-                     | "*" `S.member` cffwl = True  
+                     | "." `S.member` cffwl = True  
                      | otherwise = case getFunName fundef of 
                        { Nothing -> False
                        ; Just n  -> n `S.member` cffwl}

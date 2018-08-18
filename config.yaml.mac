@@ -3,7 +3,7 @@ gcc: /usr/local/bin/gcc-7
 
 # functions to be obfusicated
 cps: 
-  - *
+  - . # all functions
 
 cff: []
 

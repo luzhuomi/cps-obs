@@ -3,7 +3,7 @@ gcc: cc
 
 # functions to be obfusicated
 cps: 
-  - *
+  - . # all functions
 
 cff: []
 
