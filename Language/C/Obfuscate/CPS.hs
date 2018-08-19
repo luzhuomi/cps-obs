@@ -859,7 +859,7 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (var `app` (iid $ labPref ++ "0" ))) .=. rhs)) N.undefNode) 
         | scopedDecl <- scopedDecls
         , isJust (containerDeclToInit scopedDecl)
-        , let (Just (var,rhs)) = containerDeclToInit scopedDecl ] ++ 
+        , let (Just (var,rhs)) = containerDeclToInit $ dropStorageQual $ dropConstTyQual scopedDecl ] ++  -- need to drop storage qualifier see test/arrayinitlist.c
         
         -- 4. initialize the context->stack_top = 0;
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (iid stackTop) .=. (AST.CConst (AST.CIntConst (cInteger 0) N.undefNode))))) N.undefNode) | stackTop <- [ kStackTop,loopStackTop, ifcStackTop, bindStackTop ] ] ++ 
@@ -896,6 +896,9 @@ containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of
          }
   ; _ -> Nothing
   }
+                                                             
+
+
 
 -- ^ push
 
@@ -1543,7 +1546,7 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
                  | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
         -- note: we remove local decl duplicate, maybe we should let different label block to have different type decl in the ctxt, see test/scoped_dup_var.c
-                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map (cps_trans_declaration . dropConstTyQual) (formal_arg_decls ++ local_var_decls)) ++ [kStack, loopCStack, loopVStack, loopEStack, ifcCStatck, ifcTrStack, ifcFlStack, bindMStack, bindFStack, kTop, loopTop, ifcTop, bindTop ] ++ funcResult
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map (cps_trans_declaration . dropConstTyQual . dropStorageQual) (formal_arg_decls ++ local_var_decls)) ++ [kStack, loopCStack, loopVStack, loopEStack, ifcCStatck, ifcTrStack, ifcFlStack, bindMStack, bindFStack, kTop, loopTop, ifcTop, bindTop ] ++ funcResult
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
         AST.CTypeSpec (AST.CSUType
@@ -1591,6 +1594,14 @@ dropConstTyQual decl = case decl of
   { AST.CDecl declSpecifiers trips ni -> AST.CDecl (filter (not . isConst) declSpecifiers) trips ni }
   where isConst (AST.CTypeQual (AST.CConstQual _)) = True
         isConst _ = False
+
+
+-- we need to drop the static storage specifier since we need to initialize them in block 0, see test/arrayinitlist.c
+dropStorageQual :: AST.CDeclaration N.NodeInfo -> AST.CDeclaration N.NodeInfo 
+dropStorageQual decl = case decl of                    
+  { AST.CDecl declSpecifiers trips ni -> AST.CDecl (filter (not . isStorageQual) declSpecifiers) trips ni }
+
+
 
 
 -- renameDeclWithLabels :: AST.CDeclaration N.NodeInfo -> [Ident] -> [AST.CDeclaration N.NodeInfo]

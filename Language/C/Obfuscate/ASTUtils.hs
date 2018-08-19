@@ -7,7 +7,7 @@ import qualified Language.C.Data.Node as N
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
-import Language.C.Obfuscate.Var
+-- import Language.C.Obfuscate.Var
 
 -- some AST boilerplate to extract parts from the function declaration
 getFunReturnTy :: AST.CFunctionDef N.NodeInfo -> 
@@ -30,6 +30,11 @@ isFunDeclr _ = False
 isTypeSpec :: AST.CDeclarationSpecifier N.NodeInfo -> Bool
 isTypeSpec (AST.CTypeSpec _) = True
 isTypeSpec _ = False
+
+
+isStorageQual :: AST.CDeclarationSpecifier N.NodeInfo -> Bool
+isStorageQual (AST.CStorageSpec _) = True
+isStorageQual _ = False
 
 
 
@@ -93,6 +98,11 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 
 (...) :: AST.CExpression N.NodeInfo -> Ident -> AST.CExpression N.NodeInfo
 (...) struct member = AST.CMember struct member False N.undefNode
+
+
+(.+.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.+.) lhs rhs = AST.CBinary AST.CAddOp lhs rhs N.undefNode
+
 
 -- ^ array idex
 (.!!.) :: AST.CExpression N.NodeInfo ->  AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo

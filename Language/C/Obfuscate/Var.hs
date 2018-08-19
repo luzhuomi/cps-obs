@@ -18,11 +18,15 @@ import qualified Language.C.Data.Position as Pos
 import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
+
+import Language.C.Obfuscate.ASTUtils
+
 -- import for testing
 import Language.C (parseCFile, parseCFilePre)
 import Language.C.System.GCC (newGCC)
 import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
+
 
 
 -- todo:
@@ -473,6 +477,15 @@ instance Renamable (AST.CExpression N.NodeInfo) where
     ; e' <- update e
     ; return (AST.CCall f' e' nodeInfo)
     }
+                                    
+  update (AST.CBinary op lhs rhs nodeInfo) = do 
+    { lhs' <- update lhs 
+    ; rhs' <- update rhs
+    ; return (AST.CBinary op lhs' rhs' nodeInfo)
+    }
+                                             
+  update (AST.CConst const) = return (AST.CConst const)
+                                             
   update exp = error $ "can't update expression" ++ (show exp) -- (render $ pretty exp) -- todo AST.CMember 
   
 -- ^ get the container id from the lhs of the declaration  
@@ -534,7 +547,7 @@ unApp (Ident s1 hash1 nodeInfo1) =
 
 
 -- split a declaration into the declaration and a assignment statement
-splitDecl :: (Pos.Pos a) => AST.CDeclaration a -> (AST.CDeclaration a, AST.CStatement a)
+splitDecl :: AST.CDeclaration N.NodeInfo -> (AST.CDeclaration N.NodeInfo, AST.CStatement N.NodeInfo)
 splitDecl decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> 
          let getLVal mb_decltr = case mb_decltr of 
@@ -558,7 +571,33 @@ splitDecl decl = case decl of
                                                assignmt = AST.CAssign op lval rval nodeInfo1
                                            in [ AST.CExpr (Just assignmt) nodeInfo ] 
                                       }
-                               ; Just (AST.CInitList iList nodeInfo1) -> error $ "todo:  splitDecl init list is not supported " ++ show (Pos.posOf nodeInfo1) -- todo: can we do this in an assignment?
+                               ; Just (AST.CInitList iList nodeInfo1) -> 
+                                      -- error $ "todo:  splitDecl init list is not supported " ++ show (Pos.posOf nodeInfo1) -- todo: can we do this in an assignment?
+                                      {- converting 
+                                        int a[5] = {1,2,3,4,5};
+                                         to 
+                                        int a[5];
+                                        *(a+0) = 1;
+                                        *(a+1) = 2;
+                                        *(a+2) = 3;
+                                        *(a+3) = 4;
+                                        *(a+4) = 5;
+                                      -}
+                                      case getLVal mb_decltr of 
+                                        { Nothing  -> []
+                                        ; Just lval -> 
+                                             let exps = map (\(desg, init) -> 
+                                                              case desg of 
+                                                                { [] -> case init of 
+                                                                     { AST.CInitExpr cexp _ -> cexp
+                                                                     ; AST.CInitList ilist' _ -> error ("todo:  splitDecl nested init list is not supported " ++ show (Pos.posOf nodeInfo1))
+                                                                     } 
+                                                                ; _ -> error ("todo: splitDecl designator is not supported " ++ show (Pos.posOf nodeInfo1))
+                                                                }) iList
+                                                 ps = zip exps (map fromIntegral [0..])
+
+                                             in [ AST.CExpr (Just ( (ind (lval .+. (AST.CConst (AST.CIntConst (cInteger offset) nodeInfo)))) .=. cexp)) nodeInfo | (cexp, offset) <- ps ]
+                                        }
                                }
                        in (ts ++ [new_tripl], ss ++ new_stmts )
                      ) ([],[]) tripls 
