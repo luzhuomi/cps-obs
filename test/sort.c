@@ -1,5 +1,7 @@
 // #include <stdio.h>
 // selection sort
+#include <stdio.h>
+#include <stdlib.h>
 
 void sort(int a[], int size) {
   int i = 0;

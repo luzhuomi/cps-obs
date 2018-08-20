@@ -1,4 +1,6 @@
-// #include <stdio.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 int fib(int x)
 {
   int f1 = 1;
