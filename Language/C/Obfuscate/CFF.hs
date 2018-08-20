@@ -22,7 +22,8 @@ import Language.C.Obfuscate.CPS (cps_trans_phis,
                                  renameDeclWithLabeledBlocks, 
                                  declLHSEq, 
                                  cps_trans_declaration,
-                                 dropConstTyQual
+                                 dropConstTyQual,
+                                 dropStorageQual
                                  )
 
 -- import for testing
@@ -195,7 +196,7 @@ ssa2cff fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
         [ AST.CBlockStmt (AST.CExpr (Just (((cvar (iid ctxtParamName)) .->. (var `app` (iid $ labPref ++ "0" ))) .=. rhs)) N.undefNode) 
         | scopedDecl <- scopedDecls
         , isJust (containerDeclToInit scopedDecl)
-        , let (Just (var,rhs)) = containerDeclToInit scopedDecl ] ++ 
+        , let (Just (var,rhs)) = containerDeclToInit $ dropStorageQual $ dropConstTyQual scopedDecl ] ++ 
         
         -- 4. initialize the sw = 0;
         -- [ AST.CBlockStmt (AST.CExpr (Just ((cvar sw) .=. (AST.CConst (AST.CIntConst (cInteger 0) N.undefNode)))) N.undefNode) ] ++ 
@@ -248,7 +249,7 @@ mkContext name labeledBlocks formal_arg_decls local_var_decls returnType ptrArrs
                  | otherwise    = [AST.CDecl returnType [(Just (AST.CDeclr (Just $ iid "func_result") ptrArrs Nothing [] N.undefNode), Nothing, Nothing)] N.undefNode]
       decls'        = -- formal_arg_decls ++ 
         -- note: we remove local decl duplicate, maybe we should let different label block to have different type decl in the ctxt, see test/scoped_dup_var.c
-                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map (cff_trans_declaration . dropConstTyQual) (formal_arg_decls ++ local_var_decls)) ++ funcResult
+                      concatMap (\d -> renameDeclWithLabeledBlocks d labeledBlocks local_decl_vars fargs) (nubBy declLHSEq $ map (cff_trans_declaration . dropConstTyQual . dropStorageQual) (formal_arg_decls ++ local_var_decls)) ++ funcResult
       tyDef         = AST.CStorageSpec (AST.CTypedef N.undefNode)
       structDef     =
         AST.CTypeSpec (AST.CSUType
