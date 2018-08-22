@@ -56,7 +56,10 @@ cff_trans_blks isVoid localVars formalArgs ctxtName fname kenv ((l, blk):rest) =
       rest'   = cff_trans_blks isVoid localVars formalArgs ctxtName fname kenv rest
       e       =  AST.CConst (AST.CIntConst (cInteger (unLabPref l)) N.undefNode)
       --- stmts'' = (stmts'++ [AST.CBlockStmt (AST.CBreak N.undefNode)])
-  in (cCase e stmts')++rest'
+      -- need to insert "return;" if it is the last statement; otherwise it loops infinitely
+      ret     | isVoid && (null (lb_succs blk)) && (not (endsWithReturn stmts')) = [AST.CBlockStmt (AST.CReturn Nothing N.undefNode)]
+              | otherwise = []
+  in (cCase e (stmts'++ret))++rest'
 
 
 cff_trans_stmts :: Bool -> -- ^ is return type void

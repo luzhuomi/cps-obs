@@ -285,6 +285,29 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- default: stmt =>
     ; put st1{caseNodes=(caseNodes st1)++[(DefaultCase wrapNodeId rhsNodeId)]}
     }
                                           
+  -- lhs += rhs --> lhs = lhs + rhs
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CAddAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .+. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CSubAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .-. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CMulAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .*. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CDivAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval ./. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CRmdAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .%. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CShlAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .<<. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CShrAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .>>. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CAndAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .&. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.CXorAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .^. rval)) nodeInfo)
+  buildCFG (AST.CExpr (Just exp@(AST.CAssign AST.COrAssOp lval rval nodeInfo1)) nodeInfo) = 
+    buildCFG (AST.CExpr (Just $ lval .=. (lval .|. rval)) nodeInfo)
+
+
 {-
 CFG1 = CFG \update { pred : {stmts = stmts ++ [x = exp], lVars = lVars ++ [x] } }  
 x \not in {v | v \in lVars pred, pred \in preds }
@@ -321,16 +344,16 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
             cfg1       = M.insert currNodeId cfgNode cfg1'
         in do { put st{cfg = cfg1, currId=max1, currPreds=[currNodeId], continuable = True} }
     }
+    -- done: ++i ==> i=i+1                                                                                  
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreIncOp e nodeInfo')) nodeInfo) = 
-    -- todo: i++ ==> (i=i+1)-1
-    -- done: ++i ==> i=i+1
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+    -- todo: i++ ==> (i=i+1)-1  -- problem i will not registered as lval
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostIncOp e nodeInfo')) nodeInfo) = 
-    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+    buildCFG (AST.CExpr (Just $ (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo') {- .-. (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) -}) nodeInfo)
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreDecOp e nodeInfo')) nodeInfo) = 
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostDecOp e nodeInfo')) nodeInfo) = 
-    buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
+    buildCFG (AST.CExpr (Just $ (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo') {- .+. (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) -}) nodeInfo)
   -- not assigment, pretty much the same as the assignment expression except that we don't care about the lhs vars
   buildCFG (AST.CExpr (Just (AST.CComma exps ni')) ni) = mapM_ buildCFG (map (\exp -> (AST.CExpr (Just exp) ni)) exps)
   buildCFG (AST.CExpr (Just exp) nodeInfo) =  do  
@@ -1118,22 +1141,6 @@ insertGotos cfg =
                                  ; _ -> False 
                                  }) items
                          
-      endsWithGoto :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
-      endsWithGoto [] = False
-      endsWithGoto [AST.CBlockStmt (AST.CGoto succ _)] = True
-      endsWithGoto (_:xs) = endsWithGoto xs
-      
-
-      endsWithBreak :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
-      endsWithBreak [] = False
-      endsWithBreak [AST.CBlockStmt (AST.CBreak _)] = True
-      endsWithBreak (_:xs) = endsWithBreak xs
-
-      endsWithCont :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
-      endsWithCont [] = False
-      endsWithCont [AST.CBlockStmt (AST.CCont _)] = True
-      endsWithCont (_:xs) = endsWithCont xs
-
       removeLast :: [AST.CCompoundBlockItem N.NodeInfo]  -> [AST.CCompoundBlockItem N.NodeInfo] 
       removeLast [] = []
       removeLast xs = init xs

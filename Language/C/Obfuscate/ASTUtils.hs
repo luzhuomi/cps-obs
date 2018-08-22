@@ -104,6 +104,40 @@ getFormalArgIds (AST.CDecl tySpecs trips nodeInfo) = concatMap (\(mb_decltr, mb_
 (.+.) lhs rhs = AST.CBinary AST.CAddOp lhs rhs N.undefNode
 
 
+(.-.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.-.) lhs rhs = AST.CBinary AST.CSubOp lhs rhs N.undefNode
+
+
+
+(.*.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.*.) lhs rhs = AST.CBinary AST.CMulOp lhs rhs N.undefNode
+
+(./.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(./.) lhs rhs = AST.CBinary AST.CDivOp lhs rhs N.undefNode
+
+
+(.%.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.%.) lhs rhs = AST.CBinary AST.CRmdOp lhs rhs N.undefNode
+
+
+(.&.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.&.) lhs rhs = AST.CBinary AST.CAndOp lhs rhs N.undefNode
+
+(.^.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.^.) lhs rhs = AST.CBinary AST.CXorOp lhs rhs N.undefNode
+
+
+(.|.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.|.) lhs rhs = AST.CBinary AST.COrOp lhs rhs N.undefNode
+
+
+(.<<.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.<<.) lhs rhs = AST.CBinary AST.CShlOp lhs rhs N.undefNode
+
+(.>>.) :: AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
+(.>>.) lhs rhs = AST.CBinary AST.CShrOp lhs rhs N.undefNode
+
+
 -- ^ array idex
 (.!!.) :: AST.CExpression N.NodeInfo ->  AST.CExpression N.NodeInfo -> AST.CExpression N.NodeInfo
 (.!!.) arr idx = AST.CIndex arr idx N.undefNode
@@ -203,3 +237,28 @@ cBreak = AST.CBlockStmt (AST.CBreak N.undefNode)
 cWhile :: AST.CExpression N.NodeInfo -> [AST.CCompoundBlockItem N.NodeInfo] -> AST.CCompoundBlockItem N.NodeInfo
 cWhile e stmts = 
   AST.CBlockStmt (AST.CWhile e (AST.CCompound [] stmts N.undefNode) False N.undefNode)
+
+
+
+
+endsWithGoto :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+endsWithGoto [] = False
+endsWithGoto [AST.CBlockStmt (AST.CGoto succ _)] = True
+endsWithGoto (_:xs) = endsWithGoto xs
+      
+
+endsWithBreak :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+endsWithBreak [] = False
+endsWithBreak [AST.CBlockStmt (AST.CBreak _)] = True
+endsWithBreak (_:xs) = endsWithBreak xs
+
+endsWithCont :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+endsWithCont [] = False
+endsWithCont [AST.CBlockStmt (AST.CCont _)] = True
+endsWithCont (_:xs) = endsWithCont xs
+
+
+endsWithReturn :: [AST.CCompoundBlockItem N.NodeInfo] -> Bool 
+endsWithReturn [] = False
+endsWithReturn [AST.CBlockStmt (AST.CReturn _ _)] = True
+endsWithReturn (_:xs) = endsWithReturn xs
