@@ -1,10 +1,8 @@
 # location of the preprocessor
 gcc: /usr/local/bin/gcc-7
 # functions to be obfusicated
-cps: []
-    
 
-cff:
+cps: 
     - new_identifier
     - ast_error
     - ast_error_finish
@@ -23,7 +21,6 @@ cff:
     - ast_for_lambdef
     - ast_for_ifexpr
     - ast_for_listcomp
-
     - ast_for_comprehension
     - ast_for_itercomp
     - ast_for_dictcomp
@@ -35,65 +32,50 @@ cff:
     - ast_for_factor
     - ast_for_call
     - ast_for_testlist
-
     - ast_for_testlist_comp
     - ast_for_class_bases
-
     - ast_for_flow_stmt
-
     - ast_for_exec_stmt
     - ast_for_assert_stmt
     - ast_for_while_stmt
     - ast_for_for_stmt
-
-
     - ast_for_except_clause
     - ast_for_try_stmt
     - ast_for_with_item
     - ast_for_classdef
     - parsenumber
     - decode_utf8
+    # fixed after +=
+    - seq_for_testlist
+    - ast_for_exprlist
+    - ast_for_global_stmt
+    - parsestr
+    - ast_for_suite
+    - num_stmts 
+    - ast_for_print_stmt
+    - ast_for_if_stmt
+    - ast_for_atom
+    - ast_for_del_stmt
+    - count_comp_ifs
+
+cff:
 
     # the following functions can be obf'ed using cff but not cps. error: assertion fail
     - count_list_fors
     - decode_unicode
     - parsestrplus
 
+    - count_list_ifs
+    - alias_for_import_name
+    - ast_for_expr_stmt
+    - count_comp_fors
+
     
 # blacklist has no effect for now
 blacklist:
 
-    
-# new    
-    - seq_for_testlist (assertion failed)
-    - count_list_ifs (assertion failed)
-
-    - ast_for_exprlist (segfault)
-    - ast_for_global_stmt (segfault)
-
-# old
     - ast_for_expr (inf loop)
-
-    - parsestr (segfault)
-    - ast_for_suite (segfault)
-    - alias_for_import_name (segfault)
-    - PyAST_FromNode (SystemError)
-
-    - num_stmts (assertion failed)
-    - ast_for_print_stmt (assertion failed)
+    - PyAST_FromNode (assertion failed)
     - ast_for_power (assertion failed)
     - ast_for_with_stmt (assertion failed)
-    - ast_for_import_stmt (assertion failed)    
-    - ast_for_if_stmt (assertion failed)
-    
-    # most the assertion failed says (TYPE(n) == (336)), function count_comp_fors_cppobs_myLabel1, file ast_orig.c, line 1171.
-    # skipping obs count_comp_fors leads to segfault in these function
-
-    - ast_for_atom
-    - ast_for_del_stmt
-
-    - ast_for_expr_stmt (segfault)
-
-
-    - count_comp_fors
-    - count_comp_ifs
+    - ast_for_import_stmt (syntax failed)    

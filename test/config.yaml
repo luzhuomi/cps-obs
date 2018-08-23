@@ -2,10 +2,10 @@
 gcc: /usr/local/bin/gcc-7
 
 # functions to be obfusicated
-cps: 
-    - . # all files
+cps: [] 
 
-cff: [] 
+cff:
+   - .
 
 # blacklist has no effect for now
 blacklist: []
