@@ -347,9 +347,13 @@ CFG, max, preds, false |- x = exp => CFG1, max1, [], false
     -- done: ++i ==> i=i+1                                                                                  
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreIncOp e nodeInfo')) nodeInfo) = 
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
-    -- todo: i++ ==> (i=i+1)-1  -- problem i will not registered as lval
+    -- todo: i++ ==> (i=i+1)-1  -- problem i will not registered as lval thus, it will not be registered as the context.
+    -- hm.. not a good choice, it complicate the SSA renaming process.
+    -- what about, actually it does not matter since it is a stand alone statement, it will be probably a problem for j = (i++)
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostIncOp e nodeInfo')) nodeInfo) = 
-    buildCFG (AST.CExpr (Just $ (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo') {- .-. (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) -}) nodeInfo)
+    buildCFG (AST.CExpr (Just $ (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo') ) nodeInfo)
+    -- buildCFG (AST.CExpr (Just $ (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CAddOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo') .-. (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) ) nodeInfo)
+    
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPreDecOp e nodeInfo')) nodeInfo) = 
     buildCFG (AST.CExpr (Just (AST.CAssign AST.CAssignOp e (AST.CBinary AST.CSubOp e (AST.CConst (AST.CIntConst (cInteger 1) N.undefNode)) nodeInfo') nodeInfo')) nodeInfo)
   buildCFG (AST.CExpr (Just (AST.CUnary AST.CPostDecOp e nodeInfo')) nodeInfo) = 
