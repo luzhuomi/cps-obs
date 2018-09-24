@@ -17,7 +17,7 @@ gcc: gcc
 ```
 for Mac OSX, install gcc via homebrew and
 ```
-gcc: /usr/local/bin/gcc-7
+gcc: /usr/local/bin/gcc-8
 ```
 for Windows, install Visual Studio and
 ```

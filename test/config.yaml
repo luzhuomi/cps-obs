@@ -1,5 +1,5 @@
 # location of the preprocessor
-gcc: /usr/local/bin/gcc-7
+gcc: /usr/local/bin/gcc-8
 
 # functions to be obfusicated
 cps: [] 

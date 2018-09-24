@@ -883,7 +883,7 @@ ssa2cps fundef ssa@(SSA scopedDecls labelledBlocks sdom local_decl_vars fargs) =
 -- ^ refer to local_array.c
 containerDeclToInit :: AST.CDeclaration N.NodeInfo -> Maybe (Ident, AST.CExpression N.NodeInfo)
 containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of 
-  { (Just decl@(AST.CDeclr (Just arrName) [arrDecl] _ _ _), _, _):_ -> 
+  { (Just decl@(AST.CDeclr (Just arrName) [arrDecl] _ _ _), mb_init, _):_ -> 
        case arrDecl of 
          { AST.CArrDeclr _ (AST.CArrSize _ size) _ -> 
               let 
@@ -892,6 +892,19 @@ containerDeclToInit (AST.CDecl typespecs tripls nodeInfo0) = case tripls of
                          [AST.CBinary AST.CMulOp (AST.CSizeofType (AST.CDecl typespecs [] N.undefNode) N.undefNode) size N.undefNode] N.undefNode
                 cast = AST.CCast ptrToTy malloc N.undefNode
               in Just (arrName, cast)
+         {- not needed, the size is recovered during the construction of SSA, see Var.hs splitDecl      
+         ; AST.CArrDeclr _ (AST.CNoArrSize _) _ -> -- no size of the array, derive from the init list
+                case mb_init of 
+                  { Just (AST.CInitList l _) ->
+                       let size = AST.CConst (AST.CIntConst (cInteger (fromIntegral $ length l)) N.undefNode)
+                           ptrToTy = AST.CDecl typespecs [(Just (AST.CDeclr Nothing [AST.CPtrDeclr [] N.undefNode] Nothing [] N.undefNode),Nothing,Nothing)] N.undefNode
+                           malloc = AST.CCall (AST.CVar (iid "malloc") N.undefNode) 
+                                    [AST.CBinary AST.CMulOp (AST.CSizeofType (AST.CDecl typespecs [] N.undefNode) N.undefNode) size N.undefNode] N.undefNode
+                           cast = AST.CCast ptrToTy malloc N.undefNode
+                       in Just (arrName, cast)
+                  ; Nothing -> Nothing
+                  }
+         -}        
          ; _ -> Nothing
          }
   ; _ -> Nothing

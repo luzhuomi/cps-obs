@@ -117,6 +117,7 @@ instance Renamable (AST.CCompoundBlockItem N.NodeInfo) where
     ; stmt' <- rename stmt
     ; RSt lbl rn_env local_decls containers local_decl_vars fargs <- get
     ; put (RSt lbl rn_env (local_decls ++ [decl']) (containers ++ containers') local_decl_vars fargs)
+    -- ; let io = unsafePerformIO $ (print decl) >> (print "============") >> (print decl')
     ; return (AST.CBlockStmt stmt')
     } 
   update (AST.CBlockStmt stmt) = error "todo:update blockstmt"
@@ -547,6 +548,7 @@ unApp (Ident s1 hash1 nodeInfo1) =
 
 
 -- split a declaration into the declaration and a assignment statement
+-- todo: what about multi dimension array?
 splitDecl :: AST.CDeclaration N.NodeInfo -> (AST.CDeclaration N.NodeInfo, AST.CStatement N.NodeInfo)
 splitDecl decl = case decl of 
     { AST.CDecl tyspec tripls nodeInfo -> 
@@ -558,18 +560,18 @@ splitDecl decl = case decl of
              (tripls', stmts) = 
                foldl (\(ts, ss) (mb_decltr, mb_init, mb_size) -> 
                        let new_tripl = (mb_decltr, Nothing, mb_size) -- todo: what is size?
-                           new_stmts = 
+                           (new_tripl',new_stmts) = 
                              case mb_init of 
-                               { Nothing   -> []
+                               { Nothing   -> (new_tripl, [])
                                ; Just (AST.CInitExpr exp nodeInfo1) -> 
                                     case getLVal mb_decltr of 
-                                      { Nothing   -> []
+                                      { Nothing   -> (new_tripl, [])
                                       ; Just lval -> 
                                            let op   = AST.CAssignOp 
                                                -- get the lval from the decltr
                                                rval = exp -- get the rval from the exp
                                                assignmt = AST.CAssign op lval rval nodeInfo1
-                                           in [ AST.CExpr (Just assignmt) nodeInfo ] 
+                                           in (new_tripl, [ AST.CExpr (Just assignmt) nodeInfo ])
                                       }
                                ; Just (AST.CInitList iList nodeInfo1) -> 
                                       -- error $ "todo:  splitDecl init list is not supported " ++ show (Pos.posOf nodeInfo1) -- todo: can we do this in an assignment?
@@ -584,7 +586,7 @@ splitDecl decl = case decl of
                                         *(a+4) = 5;
                                       -}
                                       case getLVal mb_decltr of 
-                                        { Nothing  -> []
+                                        { Nothing  -> (new_tripl, [])
                                         ; Just lval -> 
                                              let exps = map (\(desg, init) -> 
                                                               case desg of 
@@ -595,11 +597,17 @@ splitDecl decl = case decl of
                                                                 ; _ -> error ("todo: splitDecl designator is not supported " ++ show (Pos.posOf nodeInfo1))
                                                                 }) iList
                                                  ps = zip exps (map fromIntegral [0..])
-
-                                             in [ AST.CExpr (Just ( (ind (lval .+. (AST.CConst (AST.CIntConst (cInteger offset) nodeInfo)))) .=. cexp)) nodeInfo | (cexp, offset) <- ps ]
+                                                 -- in case int a[] = {1,2,3,4,5}, we need to update a[] to a[5] before sending it back to the split
+                                                 new_tripl' = case mb_decltr of
+                                                   { Just decl@(AST.CDeclr (Just arrName) [(AST.CArrDeclr arrTys (AST.CNoArrSize _) ni')] mbLit attrs ni) -> 
+                                                        let size = AST.CConst (AST.CIntConst (cInteger (fromIntegral $ length exps)) N.undefNode)
+                                                        in (Just (AST.CDeclr (Just arrName) [(AST.CArrDeclr arrTys (AST.CArrSize False size) ni')] mbLit attrs ni), Nothing, mb_size)
+                                                   ; Nothing -> new_tripl
+                                                   }
+                                             in (new_tripl', [ AST.CExpr (Just ( (ind (lval .+. (AST.CConst (AST.CIntConst (cInteger offset) nodeInfo)))) .=. cexp)) nodeInfo | (cexp, offset) <- ps ])
                                         }
                                }
-                       in (ts ++ [new_tripl], ss ++ new_stmts )
+                       in (ts ++ [new_tripl'], ss ++ new_stmts )
                      ) ([],[]) tripls 
          in case stmts of 
            { [ stmt ] -> (AST.CDecl tyspec tripls' nodeInfo, stmt)
