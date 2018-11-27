@@ -1,14 +1,14 @@
-Name:                   cpp-obs
+Name:                   cps-obs
 Version:                0.0.7
 License:                Apache
 License-File:           LICENSE
-Copyright:              Copyright (c) 2017, Kenny Zhuo Ming Lu
+Copyright:              Copyright (c) 2018, Kenny Zhuo Ming Lu
 Author:                 Kenny Zhuo Ming Lu 
 Maintainer:             luzhuomi@gmail.com
 Stability:              Beta
 Homepage:               
-Synopsis:               C/C++ code obfuscator using SSA and CPS
-Description:            C/C++ code obfuscator using SSA and CPS
+Synopsis:               C code obfuscator using SSA and CPS
+Description:            C code obfuscator using SSA and CPS
 Category:               Language
 Tested-With:            GHC
 Build-Type:             Simple
@@ -31,6 +31,6 @@ library
   GHC-Prof-Options:       -auto-all
 
 
-executable cpp-obs
+executable cps-obs
   main-is:             Main.hs
   -- hs-source-dirs:      src

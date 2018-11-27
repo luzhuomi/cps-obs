@@ -6,10 +6,10 @@ $ cabal build
 ```
 # Running
 ```bash
-./dist/build/cpp-obs/cpp-obs test/fibiter.c fibiter_obfs.c
+./dist/build/cps-obs/cps-obs test/fibiter.c fibiter_obfs.c
 ```
 # Configuration
-cpp-obs expects a config.yaml to be placed in the currnt working directory. 
+cps-obs expects a config.yaml to be placed in the currnt working directory. 
 ## gcc 
 gcc defines the preprocessor. For instance, for linux, 
 ```
@@ -32,8 +32,8 @@ For example, refer to config.yaml or test/python_ast_config.yaml.
 # Trouble Shooting
 ## In windows, we probably encounter 
 ```
-.\dist\build\cpp-obs\cpp-obs.exe test\fibiter.c fibiter_obs.c
-cpp-obs.exe: ("C:/Program Files/Haskell Platform/8.2.1/mingw/x86_64-w64-mingw32/include/_mingw.h": line 542):
+.\dist\build\cps-obs\cps-obs.exe test\fibiter.c fibiter_obs.c
+cps-obs.exe: ("C:/Program Files/Haskell Platform/8.2.1/mingw/x86_64-w64-mingw32/include/_mingw.h": line 542):
 asmbly statement not supported.
 CallStack (from HasCallStack):
   error, called at Main.hs:41:51 in main:Main
