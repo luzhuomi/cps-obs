@@ -8,7 +8,7 @@ files as well as the run times of the application.
 ### File size explosion
 
 |    | CFF (src) | CPS (src) | CFF (obj) | CPS (obj)  |
---------------------------------------
+| ---|-----------|-----------|---------- | ---------- |
 |  fib | 1.04  | 1.31 | 1 | 1.2  |
 |    sort | 1.09  | 1.45 | 1 | 1.9  |
 |    linklist | 1.62  | 6.27  | 1.31 | 7.92  |
@@ -40,9 +40,10 @@ control flow flattening.
 
 
 |           | md5 | jpeg2ps | python2 | pigz | ffmpeg |
---------------------------------------
-|    CFF | 1.04 | 1            | 1.01       | 1.08 | 1.01     |
-|    CPS | 2.11 | 1.1         | 1.06       | 1.22 | 1.03     |
+| ----------|-----|---------|-------- | -----| ------ |
+|    CFF    | 1.04 | 1         | 1.01       | 1.08 | 1.01     |
+|    CPS    | 2.11 | 1.1       | 1.06       | 1.22 | 1.03     |
+
 In the aboe table, we report the run-time overhead incurred
 by the two obfuscation techniques. The benchmarks are collected from
 a Mac Pro with Intel XEON E5 processors. The run times are measured the user
