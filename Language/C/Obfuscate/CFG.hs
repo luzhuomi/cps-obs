@@ -16,6 +16,7 @@ import Language.C.Data.Ident
 
 import Control.Applicative
 import Control.Monad.State as M hiding (State)
+import Control.Monad.Fail as MF
 -- the data type of the control flow graph
 
 import Language.C.Obfuscate.ASTUtils
@@ -173,6 +174,8 @@ instance Monad CFGResult where
     { CFGOk a -> q a
     ; CFGError s -> CFGError s
     }
+
+instance MonadFail CFGResult where
   fail mesg = CFGError mesg
 
 instance MonadPlus CFGResult where 
@@ -268,7 +271,7 @@ CFG,max,preds, continuable, breakNodes, contNodes, caseNodes |- case e: stmt => 
       }
 
   buildCFG (AST.CCases lower upper stmt nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
+    MF.fail $ (posFromNodeInfo nodeInfo) ++ " range case stmt not supported."
 {-
 CFG, max, preds, continuable, breakNodes, contNodes, caseNodes |- stmt => CFG2, max2, preds2, continuable2, breakNodes2, contNodes2, caseNodes2 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------ 
@@ -808,7 +811,7 @@ CFG, max, preds, false |- goto L => CFG1, max1, [], false
           {  put st{cfg = cfg1, currId=max1, currPreds=[], continuable = False} }
     }
   buildCFG (AST.CGotoPtr exp nodeInfo) =  
-    fail $ (posFromNodeInfo nodeInfo) ++ "goto pointer stmt not supported."
+    MF.fail $ (posFromNodeInfo nodeInfo) ++ "goto pointer stmt not supported."
   buildCFG (AST.CCont nodeInfo) = do 
     { st <- get
     ; if (continuable st) 
@@ -915,7 +918,7 @@ CFG, max, preds, false |- return exp => CFG1, max, [], false
     }
   -- | return statement @CReturn returnExpr@
   buildCFG (AST.CAsm asmb_stmt nodeInfo) = 
-    fail $ (posFromNodeInfo nodeInfo) ++  "asmbly statement not supported." 
+    MF.fail $ (posFromNodeInfo nodeInfo) ++  "asmbly statement not supported." 
 
 
 
