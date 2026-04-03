@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 import System.Environment
 import qualified Language.C.Syntax.AST as AST
 
@@ -13,7 +14,7 @@ import Language.C.Pretty (pretty)
 import Text.PrettyPrint.HughesPJ (render, text, (<+>), hsep)
 
 
-import Data.Text (Text, unpack, pack)
+import Data.Text (Text, unpack)
 import qualified Data.Yaml as Y
 import Data.Yaml (FromJSON(..), (.:))
 import Data.ByteString (ByteString, readFile)
@@ -39,10 +40,10 @@ data Config =
 instance FromJSON Config where
   parseJSON (Y.Object v) =
     Config <$>
-    v .:   (pack "gcc")       <*>
-    v .:   (pack "cps")       <*>
-    v .:   (pack "cff")       <*>
-    v .:   (pack "blacklist")
+    v .:   "gcc"       <*>
+    v .:   "cps"       <*>
+    v .:   "cff"       <*>
+    v .:   "blacklist"
   parseJSON _ = fail "Expected Object for Config value"
 
 -- gcc = "gcc" -- for linux

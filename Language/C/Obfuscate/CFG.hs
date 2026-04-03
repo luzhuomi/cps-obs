@@ -15,6 +15,7 @@ import Language.C.Syntax.Constants
 import Language.C.Data.Ident
 
 import Control.Applicative
+import Control.Monad (MonadPlus(..))
 import Control.Monad.State as M hiding (State)
 import Control.Monad.Fail as MF
 -- the data type of the control flow graph

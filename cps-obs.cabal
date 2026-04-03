@@ -17,22 +17,36 @@ extra-source-files:  CHANGELOG.md
 
 library
   exposed-modules:     Language.C.Obfuscate.Var
-                       Language.C.Obfuscate.CFG 
+                       Language.C.Obfuscate.CFG
                        Language.C.Obfuscate.SSA
                        Language.C.Obfuscate.CPS
-                       Language.C.Obfuscate.CFF			 
+                       Language.C.Obfuscate.CFF
                        Language.C.Obfuscate.ASTUtils
   -- other-modules:
   other-extensions:    GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
-  build-depends:       base, language-c >= 0.6.1, base, mtl, containers, pretty > 1.0, yaml, bytestring, text
+  build-depends:       base          >= 4.17  && < 5,
+                       language-c    >= 0.9   && < 0.11,
+                       mtl           >= 2.2   && < 2.4,
+                       containers    >= 0.6   && < 0.8,
+                       pretty        >= 1.1   && < 1.2,
+                       yaml          >= 0.11  && < 0.13,
+                       bytestring    >= 0.11  && < 0.13,
+                       text          >= 2.0   && < 2.2
   -- hs-source-dirs:
   default-language:    Haskell2010
 
 executable cps-obs
   main-is:             Main.hs
   -- other-modules:
-  other-extensions:    GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
-  build-depends:       base, language-c >= 0.6.1, base, mtl, containers, pretty > 1.0, yaml, bytestring, text
+  other-extensions:    GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts, OverloadedStrings
+  build-depends:       base          >= 4.17  && < 5,
+                       language-c    >= 0.9   && < 0.11,
+                       mtl           >= 2.2   && < 2.4,
+                       containers    >= 0.6   && < 0.8,
+                       pretty        >= 1.1   && < 1.2,
+                       yaml          >= 0.11  && < 0.13,
+                       bytestring    >= 0.11  && < 0.13,
+                       text          >= 2.0   && < 2.2
   -- hs-source-dirs:
   default-language:    Haskell2010
 
